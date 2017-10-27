@@ -10,19 +10,28 @@ import (
 )
 
 var Logger = log.New(os.Stderr, "", log.LstdFlags|log.Lshortfile)
+var ShowLog int
 
 func logDebug(format string, args ...interface{}) {
-	Logger.Output(2, fmt.Sprintf("D "+format, args...))
+	if ShowLog > 0 {
+		Logger.Output(2, fmt.Sprintf("D "+format, args...))
+	}
 }
 
 func logInfo(format string, args ...interface{}) {
-	Logger.Output(2, fmt.Sprintf("I "+format, args...))
+	if ShowLog > 0 {
+		Logger.Output(2, fmt.Sprintf("I "+format, args...))
+	}
 }
 func logWarn(format string, args ...interface{}) {
-	Logger.Output(2, fmt.Sprintf("W "+format, args...))
+	if ShowLog > 0 {
+		Logger.Output(2, fmt.Sprintf("W "+format, args...))
+	}
 }
 func logError(format string, args ...interface{}) {
-	Logger.Output(2, fmt.Sprintf("E "+format, args...))
+	if ShowLog > 0 {
+		Logger.Output(2, fmt.Sprintf("E "+format, args...))
+	}
 }
 
 type Channel struct {

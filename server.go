@@ -84,7 +84,7 @@ func (s *Server) readChannel(conn *Channel) {
 		sid, code, buf, err := conn.ReadFrame()
 		if err != nil {
 			conn.Close()
-			logWarn("Server read channel fail with %v", err)
+			logWarn("Server read channel fail with %v from %v", err, conn.RemoteAddr())
 			break
 		}
 		logDebug("Server read %v channel data by sid(%v),code(%v)", len(buf), sid, code)
@@ -140,6 +140,13 @@ func (s *Server) readChannel(conn *Channel) {
 		}
 		logDebug("Server proxy request %v data on sid(%v) success", len(buf), sid)
 	}
+	s.clck.Lock()
+	for key, c := range s.channel {
+		if c == conn {
+			delete(s.channel, key)
+		}
+	}
+	s.clck.Unlock()
 }
 
 func (s *Server) readHost(sid uint16, conn net.Conn) {
@@ -164,8 +171,11 @@ func (s *Server) readHost(sid uint16, conn net.Conn) {
 					break
 				}
 				logWarn("Server write data to channel on sid(%v) fail with %v", sid, err)
+				s.clck.RLock()
+				delete(s.channel, sid)
+				s.clck.RUnlock()
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 			waited += 100
 			if waited > 60000 {
 				logWarn("Server wait channel on sid(%v) fail with timeout", sid)

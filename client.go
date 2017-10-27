@@ -35,25 +35,25 @@ func (f *Forward) Run(addr, host string) (err error) {
 			break
 		}
 		logInfo("Client accept from %v", con.RemoteAddr())
-		go f.Client.Proc(host, &netConn{Conn: con})
+		go f.Client.Proc(host, &NetConn{Conn: con})
 	}
 	return
 }
 
-type netConn struct {
+type NetConn struct {
 	net.Conn
 	Sid uint16
 }
 
-func (n *netConn) String() string {
+func (n *NetConn) String() string {
 	return n.RemoteAddr().String()
 }
 
-func (n *netConn) SetSid(sid uint16) {
+func (n *NetConn) SetSid(sid uint16) {
 	n.Sid = sid
 }
 
-func (n *netConn) GetSid() uint16 {
+func (n *NetConn) GetSid() uint16 {
 	return n.Sid
 }
 
@@ -150,6 +150,7 @@ func (c *Client) Proc(host string, conn Conn) {
 					break
 				}
 				logWarn("Client send data to %v fail with %v", c.URI, err)
+				c.channel = nil
 			}
 			time.Sleep(100 * time.Millisecond)
 			waited += 100
@@ -223,4 +224,22 @@ func (c *Client) readChannel(conn *Channel) {
 		}
 		logDebug("Client reponse %v data on sid(%v) success", len(buf), sid)
 	}
+}
+
+func (c *Client) Close() (err error) {
+	c.clck.Lock()
+	for sid, client := range c.sclients {
+		if c.channel != nil {
+			c.channel.WriteCodeMessage(sid, ConClosed, []byte("closed"))
+		}
+		client.Close()
+	}
+	for _, client := range c.cclients {
+		client.Close()
+	}
+	if c.channel != nil {
+		c.channel.Close()
+	}
+	c.clck.Unlock()
+	return
 }
