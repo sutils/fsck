@@ -28,6 +28,7 @@ import "C"
 
 import (
 	"io"
+	"os"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -166,7 +167,9 @@ func cgoOnTerm(count, key C.int) (reply C.int) {
 }
 
 // This function provides entries for the tab completer.
-var Completer = func(query, ctx string) []string {
+var Completer = EmptyCompleter
+
+func EmptyCompleter(query, ctx string) []string {
 	return nil
 }
 
@@ -179,7 +182,6 @@ func FilenameCompleter(query, ctx string) []string {
 	var compls []string
 	var c *C.char
 	q := C.CString(query)
-
 	for i := 0; ; i++ {
 		if c = C.rl_filename_completion_function(q, C.int(i)); c == nil {
 			break
@@ -187,9 +189,26 @@ func FilenameCompleter(query, ctx string) []string {
 		compls = append(compls, C.GoString(c))
 		C.free(unsafe.Pointer(c))
 	}
-
 	C.free(unsafe.Pointer(q))
+	return compls
+}
 
+func DirCompleter(query, ctx string) []string {
+	var compls []string
+	var c *C.char
+	q := C.CString(query)
+	for i := 0; ; i++ {
+		if c = C.rl_filename_completion_function(q, C.int(i)); c == nil {
+			break
+		}
+		name := C.GoString(c)
+		info, err := os.Stat(name)
+		if err == nil && info.IsDir() {
+			compls = append(compls, name)
+		}
+		C.free(unsafe.Pointer(c))
+	}
+	C.free(unsafe.Pointer(q))
 	return compls
 }
 

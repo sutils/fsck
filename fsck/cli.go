@@ -13,7 +13,10 @@ import (
 	"github.com/pkg/term"
 	"github.com/sutils/fsck"
 )
-import "syscall"
+import (
+	"os/exec"
+	"syscall"
+)
 
 var SpaceRegex = regexp.MustCompile("[ ]+")
 
@@ -26,6 +29,9 @@ type Terminal struct {
 	last    string
 	running bool
 	C       *fsck.Client
+	//
+	selected []string
+	bash     *Bash
 }
 
 func NewTerminal(c *fsck.Client, uri string) *Terminal {
@@ -33,6 +39,7 @@ func NewTerminal(c *fsck.Client, uri string) *Terminal {
 		ss:     map[string]*SshSession{},
 		target: "ctrl",
 		C:      c,
+		bash:   NewBash("bash"),
 	}
 }
 
@@ -108,11 +115,90 @@ func (t *Terminal) AddSession(name, uri string, connect bool) (err error) {
 	return
 }
 
+func (t *Terminal) completer(query, ctx string) (options []string) {
+	if query == ctx { //for command
+		for _, cmd := range []string{"sls", "sadd", "srm", "select", "pwd", "cd", "eval"} {
+			if strings.HasPrefix(cmd, query) {
+				options = append(options, cmd)
+			}
+		}
+		return
+	}
+	switch {
+	case strings.HasPrefix(ctx, "pwd"):
+		fallthrough
+	case strings.HasPrefix(ctx, "sls"):
+		fallthrough
+	case strings.HasPrefix(ctx, "sadd"):
+		return
+	case strings.HasPrefix(ctx, "srm"):
+		having := SpaceRegex.Split(strings.TrimSpace(strings.TrimPrefix(ctx, "srm ")), -1)
+		for name := range t.ss {
+			if Having(having, name) {
+				continue
+			}
+			if len(query) < 1 || strings.HasPrefix(name, query) {
+				options = append(options, name)
+			}
+		}
+		return
+	case strings.HasPrefix(ctx, "select"):
+		having := SpaceRegex.Split(strings.TrimSpace(strings.TrimPrefix(ctx, "select ")), -1)
+		for name := range t.ss {
+			if Having(having, name) {
+				continue
+			}
+			if len(query) < 1 || strings.HasPrefix(name, query) {
+				options = append(options, name)
+			}
+		}
+		return
+	case strings.HasPrefix(ctx, "cd"):
+		options = DirCompleter(query, ctx)
+		return
+	default:
+		options = FilenameCompleter(query, ctx)
+		return
+	}
+}
+
 func (t *Terminal) Proc() (err error) {
 	SyncHistory()
+	t.AddSession("loc.m", "root:sco@loc.m:22", true)
+	t.toHost()
+	t.target = "loc.m"
+	for {
+		char, err := t.readChar()
+		if err != nil {
+			t.CloseExit()
+			break
+		}
+		if bytes.Equal(char, CharTerm) {
+			t.CloseExit()
+			break
+		}
+		if bytes.Equal(char, CharESC) {
+			fmt.Println()
+			t.toCtrl()
+			continue
+		}
+		session := t.ss[t.target]
+		if session == nil {
+			fmt.Println("session not found by " + t.target)
+			t.toCtrl()
+			continue
+		}
+		_, err = session.Write(char)
+		if err != nil {
+			fmt.Printf("%v session fail with %v\n", session.Name, err)
+		}
+	}
 	var char []byte
 	t.running = true
+	Completer = t.completer
 	go t.HandleSignal()
+	t.bash.Start()
+	t.selected = []string{}
 	for t.running {
 		if t.target == "ctrl" {
 			baseline, err := StringCallback("ctrl> ", t.onKey)
@@ -124,35 +210,95 @@ func (t *Terminal) Proc() (err error) {
 				continue
 			}
 			StoreHistory(baseline)
-			cmds := SpaceRegex.Split(line, -1)
+			cmds := SpaceRegex.Split(line, 2)
 			switch cmds[0] {
-			case "ls":
-				for name, session := range t.ss {
-					fmt.Printf("%v:%v\n", name, session.Running)
+			case "sls":
+				if len(t.selected) > 0 {
+					for _, name := range t.selected {
+						if session, ok := t.ss[name]; ok {
+							fmt.Printf("%v:%v\n", name, session.Running)
+						} else {
+							fmt.Printf("%v:%v\n", name, "not exists")
+						}
+					}
+				} else {
+					for name, session := range t.ss {
+						fmt.Printf("%v:%v\n", name, session.Running)
+					}
 				}
-			case "add":
-				if len(cmds) < 3 {
-					fmt.Printf("Usage: add <name> <uri> [connect]\n")
+			case "sadd":
+				if len(cmds) < 2 {
+					fmt.Printf("Usage: sadd <name> <uri> [connect]\n")
 					break
 				}
-				err = t.AddSession(cmds[1], cmds[2], len(cmds) > 3 && cmds[3] == "connect")
-				if err == nil {
-					fmt.Printf("add %v success\n", cmds[1])
-				} else {
-					fmt.Printf("add %v fail with %v\n", cmds[1], err)
+				args := SpaceRegex.Split(cmds[1], 3)
+				if len(args) < 2 {
+					fmt.Printf("Usage: sadd <name> <uri> [connect]\n")
+					break
 				}
-			case "rm":
+				err = t.AddSession(args[0], args[1], len(args) > 2 && args[2] == "connect")
+				if err == nil {
+					fmt.Printf("sadd %v success\n", args[0])
+				} else {
+					fmt.Printf("sadd %v fail with %v\n", args[0], err)
+				}
+			case "srm":
 				if len(cmds) < 2 {
-					fmt.Printf("Usage: rm <name>\n")
+					fmt.Printf("Usage: srm <name>\n")
 					break
 				}
 				if session, ok := t.ss[cmds[1]]; ok {
 					session.Close()
 					delete(t.ss, cmds[1])
-					fmt.Printf("rm session %v success\n", cmds[1])
+					fmt.Printf("srm session %v success\n", cmds[1])
 				} else {
 					fmt.Printf("session %v not found\n", cmds[1])
 				}
+			case "select":
+				if len(cmds) < 2 {
+					fmt.Printf("Usage: select <name1> <name2> ...\n")
+					break
+				}
+				args := SpaceRegex.Split(cmds[1], -1)
+				if args[0] == "all" {
+					t.selected = []string{}
+					break
+				}
+				t.selected = []string{}
+				for _, name := range args {
+					if _, ok := t.ss[name]; ok {
+						t.selected = append(t.selected, name)
+					} else {
+						fmt.Printf("session %v not found, skipped\n", name)
+					}
+				}
+			// case "pwd":
+			// 	pwd, _ := os.Getwd()
+			// 	fmt.Printf("%v\n", pwd)
+			case "cd":
+				if len(cmds) < 2 {
+					fmt.Printf("Usage: cd <path>\n")
+					break
+				}
+				err := os.Chdir(cmds[1])
+				if err != nil {
+					fmt.Printf("%v\n", err)
+				}
+			// case "export":
+			// 	if len(cmds) < 2 {
+			// 		fmt.Printf("Usage: export <key=value>\n")
+			// 		break
+			// 	}
+			// 	kvs := strings.SplitN(cmds[1], "=", 2)
+			// 	t.envs[kvs[0]] = cmds[1]
+			// case "eval":
+			default:
+				cmd := exec.Command("bash", "-c", fmt.Sprintf("source /tmp/env.sh >/dev/null 2>/dev/null && %v && set>/tmp/env.sh", line))
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				cmd.Stdin = os.Stdin
+				cmd.Run()
+				// t.bash.Exec(line)
 			}
 		} else {
 			char, err = t.readChar()
@@ -181,6 +327,7 @@ func (t *Terminal) Proc() (err error) {
 			}
 		}
 	}
+	Completer = EmptyCompleter
 	return
 }
 

@@ -9,10 +9,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/term"
 	"github.com/sutils/fsck"
 )
 
 func main() {
+	_, err := term.Open("/dev/ttyxxx")
+	if err != nil {
+		panic(err)
+	}
 	if len(os.Args) < 4 {
 		printUsage()
 		os.Exit(1)
