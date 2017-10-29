@@ -128,10 +128,14 @@ func ParseSshHost(name, uri string) (host *SshHost, err error) {
 		err = fmt.Errorf("parse uri(%v) fail", uri)
 		return
 	}
+	suri := parts[1]
+	if !strings.Contains(suri, ":") {
+		suri = suri + ":22"
+	}
 	user := strings.Split(parts[0], ":")
 	host = &SshHost{
 		Name:     name,
-		URI:      parts[1],
+		URI:      suri,
 		Username: user[0],
 	}
 	if len(user) > 1 {
@@ -140,24 +144,13 @@ func ParseSshHost(name, uri string) (host *SshHost, err error) {
 	return
 }
 
-type outWriter struct {
-	Out io.Writer
-}
-
-func (o *outWriter) Write(p []byte) (n int, err error) {
-	if o.Out != nil {
-		n, err = o.Out.Write(p)
-	} else {
-		n = len(p)
-	}
-	return
-}
-
 type SshSession struct {
 	Running bool
 	*SshHost
+	*MultiWriter
+	Idx     int
 	C       *fsck.Client
-	out     outWriter
+	out     *OutWriter
 	fsckCon fsck.Conn
 	netCon  net.Conn
 	client  *ssh.Client
@@ -166,18 +159,26 @@ type SshSession struct {
 }
 
 func NewSshSession(c *fsck.Client, host *SshHost) *SshSession {
-	return &SshSession{
-		SshHost: host,
-		C:       c,
+	ss := &SshSession{
+		SshHost:     host,
+		C:           c,
+		out:         NewOutWriter(),
+		MultiWriter: NewMultiWriter(),
 	}
+	ss.MultiWriter.Add(ss.out)
+	return ss
 }
 
-func (s *SshSession) SetOut(out io.Writer) {
-	s.out.Out = out
+func (s *SshSession) String() string {
+	return s.Name
 }
 
-func (s *SshSession) GetOut() io.Writer {
-	return s.out.Out
+func (s *SshSession) EnableCallback(prefix []byte, back chan []byte) {
+	s.out.EnableCallback(prefix, back)
+}
+
+func (s *SshSession) DisableCallback() {
+	s.out.DisableCallback()
 }
 
 func (s *SshSession) Start() (err error) {
@@ -188,6 +189,7 @@ func (s *SshSession) Start() (err error) {
 
 func (s *SshSession) StartSession(con net.Conn) (err error) {
 	fmt.Printf("%v start connect to %v\n", s.Name, s.URI)
+	// create session
 	config := &ssh.ClientConfig{
 		User: s.Username,
 		Auth: []ssh.AuthMethod{
@@ -204,10 +206,10 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	if err != nil {
 		return
 	}
-	s.session.Stdout = &s.out
-	s.session.Stderr = &s.out
+	s.session.Stdout = s.MultiWriter
+	s.session.Stderr = s.MultiWriter
 	s.stdin, _ = s.session.StdinPipe()
-	//// Request pseudo terminal
+	// Request pseudo terminal
 	modes := ssh.TerminalModes{
 		ssh.ECHO:  0, // Disable echoing
 		ssh.IGNCR: 1, // Ignore CR on input.
@@ -216,7 +218,7 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	if len(pty) < 1 {
 		pty = "vt100"
 	}
-	err = s.session.RequestPty(s.Pty, 80, 40, modes)
+	err = s.session.RequestPty(pty, 80, 40, modes)
 	if err != nil {
 		return
 	}

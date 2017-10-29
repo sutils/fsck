@@ -1,87 +1,71 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"strings"
-	"sync"
 	"time"
+
+	"github.com/kr/pty"
 )
 
-type Bash struct {
-	C     *exec.Cmd
-	Shell string
-	// Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
-	stdin  io.Writer
-	stdout io.Reader
-	wait   chan string
-	key    string
-	eidc   uint32
-	lck    sync.RWMutex
+type Cmd struct {
+	*exec.Cmd
+	*MultiWriter
+	Name   string
+	pipe   *os.File
+	out    *OutWriter
+	Prefix io.Reader
 }
 
-func NewBash(shell string) *Bash {
-	return &Bash{
-		C:      exec.Command(shell),
-		Shell:  shell,
-		Stdout: os.Stdout,
-		Stderr: os.Stderr,
-		wait:   make(chan string),
-		lck:    sync.RWMutex{},
+func NewCmd(name, shell string) (cmd *Cmd) {
+	cmd = &Cmd{
+		Name:        name,
+		Cmd:         exec.Command(shell),
+		out:         NewOutWriter(),
+		MultiWriter: NewMultiWriter(),
 	}
+	cmd.MultiWriter.Add(cmd.out)
+	cmd.Env = os.Environ()
+	return
 }
 
-func (b *Bash) Start() (err error) {
-	b.C.Stderr = b.Stderr
-	// if err != nil {
-	// 	return
-	// }
-	b.stdout, err = b.C.StdoutPipe()
-	// if err != nil {
-	// 	return
-	// }
-	b.stdin, err = b.C.StdinPipe()
-	// if err != nil {
-	// 	return
-	// }
-	go b.readStdout()
-	return b.C.Start()
+func (c *Cmd) AddEnv(env ...string) {
+	c.Env = append(c.Env, env...)
 }
 
-func (b *Bash) readStdout() {
-	reader := bufio.NewReader(b.stdout)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		// fmt.Println(line, strings.Contains(line, b.key))
-		if len(b.key) > 0 && strings.Contains(line, b.key) {
-			b.wait <- "done"
-			line = strings.Replace(line, b.key, "", 1)
-			if len(line) < 1 {
-				continue
-			}
-		}
-		fmt.Fprintf(b.Stdout, "%v", line)
-	}
+func (c *Cmd) AddEnvf(format string, args ...interface{}) {
+	c.Env = append(c.Env, fmt.Sprintf(format, args...))
 }
 
-func (b *Bash) Exec(line string) {
-	b.lck.Lock()
-	defer b.lck.Unlock()
-	line = strings.TrimSpace(line)
-	if strings.HasSuffix(line, "&") {
-		fmt.Fprintf(b.stdin, "%v\n", line)
-		time.Sleep(100 * time.Millisecond)
+func (c *Cmd) String() string {
+	return c.Name
+}
+
+func (c *Cmd) Start() (err error) {
+	c.Env = append(c.Env, fmt.Sprintf("PS1=%v> ", c.Name))
+	c.pipe, err = pty.Start(c.Cmd)
+	if err != nil {
 		return
 	}
-	b.key = fmt.Sprintf("-a%va-\n", b.eidc)
-	fmt.Fprintf(b.stdin, "%v && echo %v", line, b.key)
-	<-b.wait
+	go io.Copy(c.MultiWriter, c.pipe)
+	if c.Prefix != nil {
+		io.Copy(c, c.Prefix)
+	}
+	time.Sleep(100 * time.Millisecond)
+	return
+}
+
+func (c *Cmd) EnableCallback(prefix []byte, back chan []byte) {
+	c.out.EnableCallback(prefix, back)
+}
+
+func (c *Cmd) DisableCallback() {
+	c.out.DisableCallback()
+}
+
+func (c *Cmd) Write(p []byte) (n int, err error) {
+	n, err = c.pipe.Write(p)
+	return
 }

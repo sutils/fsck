@@ -4,21 +4,73 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
+	"io/ioutil"
+	"log"
 	"os"
-	"sync"
-	"time"
+	"path/filepath"
+	"strings"
 
-	"github.com/pkg/term"
 	"github.com/sutils/fsck"
 )
 
-func main() {
-	_, err := term.Open("/dev/ttyxxx")
-	if err != nil {
-		panic(err)
+func JoinArgs(cmd string, args ...string) string {
+	nargs := []string{}
+	for _, arg := range append([]string{cmd}, args...) {
+		if strings.Contains(arg, " ") {
+			if strings.Contains(arg, "'") {
+				nargs = append(nargs, "'"+arg+"'")
+			} else {
+				nargs = append(nargs, "\""+arg+"\"")
+			}
+		} else {
+			nargs = append(nargs, arg)
+		}
 	}
-	if len(os.Args) < 4 {
+	return strings.Join(nargs, " ")
+}
+
+func copyBuffer(dst io.Writer, src io.Reader, buf []byte) (written int64, err error) {
+	// If the reader has a WriteTo method, use it to do the copy.
+	// Avoids an allocation and a copy.
+	if wt, ok := src.(io.WriterTo); ok {
+		return wt.WriteTo(dst)
+	}
+	// Similarly, if the writer has a ReadFrom method, use it to do the copy.
+	if rt, ok := dst.(io.ReaderFrom); ok {
+		return rt.ReadFrom(src)
+	}
+	if buf == nil {
+		buf = make([]byte, 32*1024)
+	}
+	for {
+		nr, er := src.Read(buf)
+		fmt.Println("-->", nr)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[0:nr])
+			if nw > 0 {
+				written += int64(nw)
+			}
+			if ew != nil {
+				err = ew
+				break
+			}
+			if nr != nw {
+				err = io.ErrShortWrite
+				break
+			}
+		}
+		if er != nil {
+			if er != io.EOF {
+				err = er
+			}
+			break
+		}
+	}
+	return written, err
+}
+
+func main() {
+	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
 	}
@@ -37,69 +89,57 @@ func main() {
 			os.Exit(1)
 		}
 		server.Run()
-	case "-cli":
+	case "-c":
+		debug, err := os.OpenFile("/tmp/fsck.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
+		if err != nil {
+			panic(err)
+		}
+		// log.SetOutput(ioutil.Discard)
+		webcmd, _ := filepath.Abs(os.Args[0])
 		client := fsck.NewClient("localhost:9234", "abc")
-		terminal := NewTerminal(client, os.Args[2])
-		fmt.Println(terminal.Proc())
-	case "-cli2":
-		// fsck.ShowLog = 1
-		client := fsck.NewClient("localhost:9234", "abc")
-		host, err := ParseSshHost("loc.m", "root:sco@loc.m:22")
+		terminal := NewTerminal(client, os.Args[2], "bash", webcmd)
+		log.SetOutput(io.MultiWriter(debug, NewNamedWriter("debug", terminal.Log)))
+		terminal.Proc()
+	case "-lc":
+		url, err := findWebURL()
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		session := NewSshSession(client, host)
-		session.SetOut(os.Stdout)
-		session.Start()
-		io.Copy(session, os.Stdin)
-	case "-cli3":
-		// fsck.ShowLog = 1
-		client := fsck.NewClient("localhost:9234", "abc")
-		host, err := ParseSshHost("loc.m", "root:sco@loc.m:22")
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		session := NewSshSession(client, host)
-		var srvCon fsck.Conn
-		var cliCon net.Conn
-		if false {
-			wg := sync.WaitGroup{}
-			wg.Add(2)
-			go func() {
-				l, _ := net.Listen("tcp", ":2442")
-				raw, _ := l.Accept()
-				srvCon = &fsck.NetConn{Conn: raw}
-				wg.Done()
-			}()
-			time.Sleep(time.Second)
-			go func() {
-				cliCon, err = net.Dial("tcp", ":2442")
-				wg.Done()
-			}()
-			wg.Wait()
-
-		}
-		if true {
-			srvCon, cliCon = SshPipe(host.URI)
-		}
-		// fsckCon, netCon := SshPipe(host.URI)
-		// go io.Copy(fsckCon, con)
-		// go io.Copy(con, fsckCon)
-		go client.Proc("loc.m:22", srvCon)
-		session.StartSession(cliCon)
-		// session.SetOut(os.Stdout)
-		// session.Start()
-		io.Copy(session, os.Stdin)
+		os.Exit(ExecWebLog(url+"/log", strings.Join(os.Args[2:], ","), os.Stdout))
 	default:
-		// client, err := fsck.NewForward(fsck.NewClient(os.Args[2], os.Args[3]))
-		// if err != nil {
-		// 	fmt.Println(err)
-		// 	os.Exit(1)
-		// }
-		// client.Run()
+		url, err := findWebURL()
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		cmds := JoinArgs(strings.TrimPrefix(os.Args[1], "-"), os.Args[2:]...)
+		os.Exit(ExecWebCmd(url+"/exec", cmds, os.Stdout))
 	}
+}
+
+func findWebURL() (string, error) {
+	url := os.Getenv(KeyWebCmdURL)
+	if len(url) < 1 {
+		conf := map[string]interface{}{}
+		data, err := ioutil.ReadFile("/tmp/fsck_conf.json")
+		if err != nil {
+			err = fmt.Errorf("find the fsck web url fail")
+			return url, err
+		}
+		err = json.Unmarshal(data, &conf)
+		if err != nil {
+			err = fmt.Errorf("read fsck config file(%v) fail with %v", "/tmp/fsck_conf.json", err)
+			return url, err
+		}
+		rurl, ok := conf["web_url"].(string)
+		if !ok {
+			err = fmt.Errorf("read fsck config file(%v) fail with %v", "/tmp/fsck_conf.json", "web_url not configured")
+			return url, err
+		}
+		url = rurl
+	}
+	return url, nil
 }
 
 func printUsage() {
