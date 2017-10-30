@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"path/filepath"
 
 	"github.com/sutils/readkey"
 )
@@ -84,19 +85,19 @@ func (t *Task) Close() error {
 
 type Terminal struct {
 	// ss        map[string]*SshSession
-	ss        *list.List
-	slck      sync.RWMutex
-	Cmd       *Cmd
-	Web       *Web
-	Log       *WebLogger
-	last      string
-	running   bool
-	C         *fsck.Client
-	Mux       *http.ServeMux
-	WebSrv    *httptest.Server
-	WebCmd    string //the web cmd path
-	CmdPrefix string
-	ConfPath  string
+	ss           *list.List
+	slck         sync.RWMutex
+	Cmd          *Cmd
+	Web          *Web
+	Log          *WebLogger
+	last         string
+	running      bool
+	C            *fsck.Client
+	Mux          *http.ServeMux
+	WebSrv       *httptest.Server
+	WebCmd       string //the web cmd path
+	CmdPrefix    string
+	InstancePath string
 	//
 	selected  []string
 	activited Shell
@@ -109,22 +110,22 @@ type Terminal struct {
 	taskLck sync.RWMutex
 }
 
-func NewTerminal(c *fsck.Client, uri, shell, webcmd string) *Terminal {
+func NewTerminal(c *fsck.Client, ps1, shell, webcmd string) *Terminal {
 	term := &Terminal{
 		// ss:        map[string]*SshSession{},
-		ss:        list.New(),
-		slck:      sync.RWMutex{},
-		C:         c,
-		Mux:       http.NewServeMux(),
-		Cmd:       NewCmd("sctrl", shell),
-		Web:       NewWeb(nil),
-		Log:       NewWebLogger(),
-		WebCmd:    webcmd,
-		CmdPrefix: "-sctrl: ",
-		callback:  make(chan []byte, 100),
-		tasks:     map[string]*Task{},
-		taskLck:   sync.RWMutex{},
-		ConfPath:  "/tmp/fsck_conf.json",
+		ss:           list.New(),
+		slck:         sync.RWMutex{},
+		C:            c,
+		Mux:          http.NewServeMux(),
+		Cmd:          NewCmd("sctrl", ps1, shell),
+		Web:          NewWeb(nil),
+		Log:          NewWebLogger(),
+		WebCmd:       webcmd,
+		CmdPrefix:    "-sctrl: ",
+		callback:     make(chan []byte, 100),
+		tasks:        map[string]*Task{},
+		taskLck:      sync.RWMutex{},
+		InstancePath: "/tmp/.sctrl_instance.json",
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
@@ -133,13 +134,13 @@ func NewTerminal(c *fsck.Client, uri, shell, webcmd string) *Terminal {
 	prefix := bytes.NewBuffer(nil)
 	fmt.Fprintf(prefix, "set +o history\n")
 	fmt.Fprintf(prefix, "alias sctrl='%v'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sadd='%v -sadd'\n", webcmd)
-	fmt.Fprintf(prefix, "alias srm='%v -srm'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sall='%v -sall'\n", webcmd)
-	fmt.Fprintf(prefix, "alias spick='%v -spick'\n", webcmd)
-	fmt.Fprintf(prefix, "alias shelp='%v -shelp'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sexec='%v -sexec'\n", webcmd)
-	fmt.Fprintf(prefix, "alias seval='%v -seval'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sadd='%v -run sadd'\n", webcmd)
+	fmt.Fprintf(prefix, "alias srm='%v -run srm'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sall='%v -run sall'\n", webcmd)
+	fmt.Fprintf(prefix, "alias spick='%v -run spick'\n", webcmd)
+	fmt.Fprintf(prefix, "alias shelp='%v -run shelp'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sexec='%v -run sexec'\n", webcmd)
+	fmt.Fprintf(prefix, "alias seval='%v -run seval'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
@@ -425,24 +426,29 @@ func (t *Terminal) NotifyTitle() {
 }
 
 func (t *Terminal) Activate(shell Shell) {
+	fmt.Println()
 	if t.activited == shell {
-		fmt.Printf("\n%v is activated now", t.activited)
+		fmt.Printf("%v is activated now", t.activited)
 		t.activited.Write([]byte("\n"))
-		return
-	}
-	shell.Add(os.Stdout)
-	_, err := shell.Write([]byte("\n"))
-	if err != nil {
-		fmt.Printf("%v activate fail with %v\n", shell, err)
-		shell.Remove(os.Stdout)
 		return
 	}
 	if t.activited != nil {
 		t.activited.Remove(os.Stdout)
 	}
+	shell.Add(os.Stdout)
+	_, err := shell.Write([]byte("\n"))
+	if err != nil {
+		shell.Remove(os.Stdout)
+		if t.activited != nil {
+			t.activited.Add(os.Stdout)
+			fmt.Printf("%v activate fail with %v", shell, err)
+			t.activited.Write([]byte("\n"))
+		}
+		return
+	}
 	t.last = shell.String()
-	fmt.Printf("\n%v is activated now", t.last)
 	t.activited = shell
+	fmt.Printf("%v is activated now", t.activited)
 }
 
 func (t *Terminal) Switch(name string) (switched bool) {
@@ -541,23 +547,43 @@ func (t *Terminal) AddSession(name, uri string, connect bool) (err error) {
 }
 
 func (t *Terminal) SaveConf() {
-	if len(t.ConfPath) < 1 {
+	if len(t.InstancePath) < 1 {
 		return
 	}
-	conf := map[string]interface{}{
+	conf := []map[string]interface{}{}
+	data, err := ioutil.ReadFile(t.InstancePath)
+	if err == nil {
+		json.Unmarshal(data, &conf)
+	}
+	pwd, _ := os.Getwd()
+	_, name := filepath.Split(pwd)
+	newone := map[string]interface{}{
 		"web_url": t.WebSrv.URL,
+		"pwd":     pwd,
+		"name":    name,
 	}
-	data, err := json.Marshal(conf)
+	for idx, cf := range conf {
+		cpwd, _ := cf["pwd"].(string)
+		if cpwd == pwd {
+			conf[idx] = newone
+			newone = nil
+		}
+	}
+	if newone != nil {
+		conf = append(conf, newone)
+	}
+	data, err = json.Marshal(conf)
 	if err != nil {
-		log.Printf("save conf to %v fail with %v", t.ConfPath, err)
+		log.Printf("save instance info to %v fail with %v", t.InstancePath, err)
 		return
 	}
-	os.Remove(t.ConfPath)
-	err = ioutil.WriteFile(t.ConfPath, data, 0x775)
+	os.Remove(t.InstancePath)
+	err = ioutil.WriteFile(t.InstancePath, data, 0x775)
 	if err != nil {
-		log.Printf("save conf to %v fail with %v", t.ConfPath, err)
+		log.Printf("save instance info to %v fail with %v", t.InstancePath, err)
 		return
 	}
+	log.Printf("save instance info to %v success", t.InstancePath)
 }
 
 func (t *Terminal) Proc() (err error) {

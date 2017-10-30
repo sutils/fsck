@@ -14,14 +14,16 @@ type Cmd struct {
 	*exec.Cmd
 	*MultiWriter
 	Name   string
+	PS1    string
 	pipe   *os.File
 	out    *OutWriter
 	Prefix io.Reader
 }
 
-func NewCmd(name, shell string) (cmd *Cmd) {
+func NewCmd(name, ps1, shell string) (cmd *Cmd) {
 	cmd = &Cmd{
 		Name:        name,
+		PS1:         ps1,
 		Cmd:         exec.Command(shell),
 		out:         NewOutWriter(),
 		MultiWriter: NewMultiWriter(),
@@ -44,7 +46,7 @@ func (c *Cmd) String() string {
 }
 
 func (c *Cmd) Start() (err error) {
-	c.Env = append(c.Env, fmt.Sprintf("PS1=%v> ", c.Name))
+	c.Env = append(c.Env, "PS1="+c.PS1)
 	c.pipe, err = pty.Start(c.Cmd)
 	if err != nil {
 		return

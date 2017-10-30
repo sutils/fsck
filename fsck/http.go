@@ -98,18 +98,15 @@ func ExecWebCmd(url string, cmds string, out io.Writer) (code int) {
 	return
 }
 
-func ExecWebLog(url string, ns string, out io.Writer) (code int) {
+func ExecWebLog(url string, ns string, out io.Writer) (code int, err error) {
 	resp, err := http.Get(url + "?name=" + ns)
 	if err != nil {
-		fmt.Fprintf(out, "-error: %v\n", err)
-		code = 500
+		code = -1
 		return
 	}
 	_, err = io.Copy(out, resp.Body)
 	if err != nil {
 		code = resp.StatusCode
-		fmt.Fprintf(out, "-error: %v\n", err)
-		return
 	}
 	return
 }

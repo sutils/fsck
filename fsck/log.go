@@ -80,8 +80,6 @@ func (w *WebLogWriter) Add(writer io.Writer) {
 	buf := w.Buf.Bytes()
 	if len(buf) > 0 {
 		writer.Write(buf)
-	} else {
-		writer.Write([]byte("web logger started...\n"))
 	}
 	w.lck.Unlock()
 }
@@ -116,8 +114,9 @@ func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		return
 	}
 	log.Printf("add web log by name:%v", ns)
-	w.wslck.Lock()
 	wwriter := NewWaitWriter(NewNoBufferResponseWriter(resp))
+	fmt.Fprintf(wwriter, "->web logger is started by %v\n", ns)
+	w.wslck.Lock()
 	used := []*WebLogWriter{}
 	for _, name := range strings.Split(ns, ",") {
 		ws := w.allws[name]

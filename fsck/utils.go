@@ -3,6 +3,7 @@ package main
 import (
 	"container/list"
 	"io"
+	"strings"
 	"sync"
 )
 
@@ -129,4 +130,26 @@ func (m *MultiWriter) Remove(w io.Writer) {
 			m.allws.Remove(em)
 		}
 	}
+}
+
+func JoinArgs(cmd string, args ...string) string {
+	nargs := []string{}
+	realArgs := []string{}
+	if len(cmd) > 0 {
+		realArgs = append([]string{cmd}, args...)
+	} else {
+		realArgs = args
+	}
+	for _, arg := range realArgs {
+		if strings.Contains(arg, " ") {
+			if strings.Contains(arg, "'") {
+				nargs = append(nargs, "'"+arg+"'")
+			} else {
+				nargs = append(nargs, "\""+arg+"\"")
+			}
+		} else {
+			nargs = append(nargs, arg)
+		}
+	}
+	return strings.Join(nargs, " ")
 }

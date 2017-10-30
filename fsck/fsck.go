@@ -1,150 +1,418 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sutils/fsck"
 )
 
-func JoinArgs(cmd string, args ...string) string {
-	nargs := []string{}
-	for _, arg := range append([]string{cmd}, args...) {
-		if strings.Contains(arg, " ") {
-			if strings.Contains(arg, "'") {
-				nargs = append(nargs, "'"+arg+"'")
-			} else {
-				nargs = append(nargs, "\""+arg+"\"")
-			}
-		} else {
-			nargs = append(nargs, arg)
-		}
-	}
-	return strings.Join(nargs, " ")
+const Version = "1.0.0"
+
+type ArrayFlags []string
+
+func (a *ArrayFlags) String() string {
+	return strings.Join(*a, ",")
 }
 
-func copyBuffer(dst io.Writer, src io.Reader, buf []byte) (written int64, err error) {
-	// If the reader has a WriteTo method, use it to do the copy.
-	// Avoids an allocation and a copy.
-	if wt, ok := src.(io.WriterTo); ok {
-		return wt.WriteTo(dst)
-	}
-	// Similarly, if the writer has a ReadFrom method, use it to do the copy.
-	if rt, ok := dst.(io.ReaderFrom); ok {
-		return rt.ReadFrom(src)
-	}
-	if buf == nil {
-		buf = make([]byte, 32*1024)
-	}
-	for {
-		nr, er := src.Read(buf)
-		fmt.Println("-->", nr)
-		if nr > 0 {
-			nw, ew := dst.Write(buf[0:nr])
-			if nw > 0 {
-				written += int64(nw)
-			}
-			if ew != nil {
-				err = ew
-				break
-			}
-			if nr != nw {
-				err = io.ErrShortWrite
-				break
-			}
-		}
-		if er != nil {
-			if er != io.EOF {
-				err = er
-			}
-			break
+func (a *ArrayFlags) Set(value string) error {
+	for _, val := range *a {
+		if val == value {
+			return nil
 		}
 	}
-	return written, err
+	*a = append(*a, value)
+	return nil
+}
+
+//common argument falgs
+var loglevel int
+var help bool
+
+//not alias argument
+var runClient bool
+var runServer bool
+var runLogCli bool
+var runExec bool
+
+func regCommonFlags() {
+	flag.BoolVar(&help, "h", false, "show help")
+	flag.IntVar(&loglevel, "loglevel", 0, "the log level")
+}
+
+//sctrl-server argument flags
+var listen string
+var tokenList ArrayFlags
+
+func regServerFlags(alias bool) {
+	flag.StringVar(&listen, "listen", ":9234", "the sctrl server listen address")
+	flag.Var(&tokenList, "token", "the auth token")
+	if !alias {
+		flag.BoolVar(&runServer, "s", false, "run as server")
+	}
+}
+
+//
+//sctrl-client argument
+var serverAddr string
+var loginToken string
+var bash string
+var ps1 string
+var instancePath string
+
+func regClientFlags(alias bool) {
+	flag.StringVar(&serverAddr, "server", "sctrl.srv:9234", "the sctrl server address")
+	flag.StringVar(&loginToken, "login", "", "the token for login to server")
+	flag.StringVar(&bash, "bash", "bash", "the control bash path")
+	flag.StringVar(&ps1, "ps1", "Sctrl \\W>", "the bash ps1")
+	flag.StringVar(&instancePath, "instance", "/tmp/.sctrl_instance.json", "the path to save the sctrl instance configure info")
+	if !alias {
+		flag.BoolVar(&runClient, "c", false, "run as client")
+	}
+}
+
+//
+//sctrl-exec argument
+func regExecFlags(alias bool) {
+	if !alias {
+		flag.BoolVar(&runExec, "run", false, "the command to execute")
+	}
+}
+
+func printAllUsage(code int) {
+	regClientFlags(false)
+	regCommonFlags()
+	regServerFlags(false)
+	regExecFlags(false)
+	flag.Usage()
+	os.Exit(code)
+}
+
+func printServerUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -listen :9423 -token abc\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -s [option]\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -s -listen :9423 -token abc\n", name)
+	}
+	fmt.Fprintf(os.Stderr, "Server options:\n")
+	flag.PrintDefaults()
+	os.Exit(code)
+}
+
+func printClientUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -server sctrl.srv:9423 -login abc\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -c [option]\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -c -server sctrl.srv:9423 -login abc\n", name)
+	}
+	fmt.Fprintf(os.Stderr, "Client options:\n")
+	flag.PrintDefaults()
+	os.Exit(code)
+}
+
+func printLogCliUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [log name] [log name2] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v debug\n", name)
+		fmt.Fprintf(os.Stderr, "        %v host1\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -lc [log name] [log name2] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -lc debug\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -lc host1\n", name)
+	}
+	os.Exit(code)
+}
+
+func printExecUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [command] [arg1] [arg2] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v sadd host root:xxx@host.local\n", name)
+		fmt.Fprintf(os.Stderr, "        %v spick host host1\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -run [command] [arg1] [arg2] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -run sadd host root:xxx@host.local\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -run spick host host1\n", name)
+	}
+	os.Exit(code)
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		printUsage()
+	_, name := filepath.Split(os.Args[0])
+	mode := ""
+	if len(os.Args) > 1 {
+		mode = os.Args[1]
+	}
+	switch {
+	case name == "sctrl-server" || mode == "-s":
+		regCommonFlags()
+		regServerFlags(name == "sctrl-server")
+		flag.Parse()
+		if help {
+			printServerUsage(0, name == "sctrl-server")
+		}
+		if len(listen) < 1 || len(tokenList) < 1 {
+			printServerUsage(1, name == "sctrl-server")
+		}
+		sctrlServer()
+	case name == "sctrl-client" || mode == "-c":
+		regCommonFlags()
+		regClientFlags(name == "sctrl-client")
+		flag.Parse()
+		if help {
+			printClientUsage(0, name == "sctrl-server")
+		}
+		if len(serverAddr) < 1 || len(loginToken) < 1 {
+			flag.Usage()
+			os.Exit(1)
+		}
+		sctrlClient()
+	case name == "sctrl-log" || mode == "-lc":
+		for _, arg := range os.Args {
+			if arg == "-h" {
+				printLogCliUsage(0, name == "sctrl-server")
+			}
+		}
+		if mode == "-lc" {
+			if len(os.Args) < 3 {
+				printLogCliUsage(1, name == "sctrl-server")
+			}
+			sctrlLogCli(os.Args[2:]...)
+		} else {
+			if len(os.Args) < 2 {
+				printLogCliUsage(1, name == "sctrl-server")
+			}
+			sctrlLogCli(os.Args[1:]...)
+		}
+	case name == "sctrl-exec" || mode == "-run":
+		for _, arg := range os.Args {
+			if arg == "-h" {
+				printExecUsage(0, name == "sctrl-exec")
+			}
+		}
+		if mode == "-run" {
+			if len(os.Args) < 3 {
+				printExecUsage(1, name == "sctrl-exec")
+			}
+			sctrlExec(JoinArgs("", os.Args[2:]...))
+		} else {
+			if len(os.Args) < 2 {
+				printExecUsage(1, name == "sctrl-exec")
+			}
+			sctrlExec(JoinArgs("", os.Args[1:]...))
+		}
+	case mode == "-h":
+		printAllUsage(0)
+	default:
+		printAllUsage(1)
+	}
+}
+
+func sctrlServer() {
+	log.Printf("start sctrl server by listen(%v),loglevel(%v),token(%v)", listen, loglevel, tokenList)
+	fsck.ShowLog = loglevel
+	tokens := map[string]int{}
+	for _, token := range tokenList {
+		tokens[token] = 1
+	}
+	server, err := fsck.NewServer(listen, tokens)
+	if err != nil {
+		fmt.Println(err)
 		os.Exit(1)
 	}
-	switch os.Args[1] {
-	case "-s":
-		fsck.ShowLog = 1
-		tokens := map[string]int{}
-		err := json.Unmarshal([]byte(os.Args[3]), &tokens)
-		if err != nil {
+	server.Run()
+}
+
+func sctrlClient() {
+	webcmd, _ := filepath.Abs(os.Args[0])
+	client := fsck.NewClient(serverAddr, loginToken)
+	terminal := NewTerminal(client, ps1, bash, webcmd)
+	terminal.InstancePath = instancePath
+	log.SetOutput(NewNamedWriter("debug", terminal.Log))
+	terminal.Proc()
+}
+
+func sctrlExec(cmds string) {
+	url, _, err := findWebURL("", false, time.Millisecond)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	os.Exit(ExecWebCmd(url+"/exec", cmds, os.Stdout))
+}
+
+func sctrlLogCli(name ...string) {
+	var url, last string
+	var err error
+	delay := 5 * time.Second
+	for {
+		url, last, err = findWebURL(last, true, delay)
+		if err != nil { //having error.
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		server, err := fsck.NewServer(os.Args[2], tokens)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+		name := strings.Join(name, ",")
+		_, err := ExecWebLog(url+"/log", name, os.Stdout)
+		if err != nil && reflect.TypeOf(err).String() == "*url.Error" && len(last) > 0 {
+			fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
+		} else {
+			fmt.Printf("->reply error:%v", err)
 		}
-		server.Run()
-	case "-c":
-		debug, err := os.OpenFile("/tmp/fsck.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
-		if err != nil {
-			panic(err)
-		}
-		// log.SetOutput(ioutil.Discard)
-		webcmd, _ := filepath.Abs(os.Args[0])
-		client := fsck.NewClient("localhost:9234", "abc")
-		terminal := NewTerminal(client, os.Args[2], "bash", webcmd)
-		log.SetOutput(io.MultiWriter(debug, NewNamedWriter("debug", terminal.Log)))
-		terminal.Proc()
-	case "-lc":
-		url, err := findWebURL()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		os.Exit(ExecWebLog(url+"/log", strings.Join(os.Args[2:], ","), os.Stdout))
-	default:
-		url, err := findWebURL()
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		cmds := JoinArgs(strings.TrimPrefix(os.Args[1], "-"), os.Args[2:]...)
-		os.Exit(ExecWebCmd(url+"/exec", cmds, os.Stdout))
+		time.Sleep(delay)
 	}
 }
 
-func findWebURL() (string, error) {
-	url := os.Getenv(KeyWebCmdURL)
-	if len(url) < 1 {
-		conf := map[string]interface{}{}
-		data, err := ioutil.ReadFile("/tmp/fsck_conf.json")
-		if err != nil {
+func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd string, err error) {
+	url = os.Getenv(KeyWebCmdURL)
+	if len(url) > 0 {
+		return
+	}
+	var data []byte
+	var confPath string
+	var oneconf map[string]interface{}
+	allConf := []string{
+		filepath.Join(os.Getenv("HOME"), ".sctrl_instance.json"),
+		filepath.Join(os.Getenv("TMPDIR"), ".sctrl_instance.json"),
+		filepath.Join("/tmp", ".sctrl_instance.json"),
+	}
+	for {
+		confList := []map[string]interface{}{}
+		for _, confPath = range allConf {
+			data, err = ioutil.ReadFile(confPath)
+			if err == nil {
+				break
+			}
+		}
+		if data == nil {
+			if wait {
+				fmt.Printf("->instance conf is not found on %v, will try after %v\n", allConf, delay)
+				time.Sleep(delay)
+				continue
+			}
 			err = fmt.Errorf("find the fsck web url fail")
-			return url, err
+			return
 		}
-		err = json.Unmarshal(data, &conf)
+		err = json.Unmarshal(data, &confList)
 		if err != nil {
-			err = fmt.Errorf("read fsck config file(%v) fail with %v", "/tmp/fsck_conf.json", err)
-			return url, err
+			err = fmt.Errorf("read fsck config file(%v) fail with %v", confPath, err)
+			return
 		}
-		rurl, ok := conf["web_url"].(string)
-		if !ok {
-			err = fmt.Errorf("read fsck config file(%v) fail with %v", "/tmp/fsck_conf.json", "web_url not configured")
-			return url, err
+		if len(confList) < 1 {
+			//configure not found
+			if wait {
+				fmt.Printf("->instance list is empty on %v, will try after %v", confPath, delay)
+				time.Sleep(delay)
+				continue
+			}
+			err = fmt.Errorf("not running instance")
+			return
 		}
-		url = rurl
+		if len(last) > 0 {
+			//the pwd is specified
+			for _, conf := range confList {
+				pwd = fmt.Sprintf("%v", conf["pwd"].(string))
+				if pwd == last {
+					oneconf = conf
+					break
+				}
+			}
+			if oneconf != nil {
+				break
+			}
+			//last not foud
+			if wait {
+				fmt.Printf("->last instance(%v) is offline, will try after %v", last, delay)
+				time.Sleep(delay)
+				continue
+			}
+			err = fmt.Errorf("not instance for pwd(%v)", last)
+			return
+		}
+		if len(confList) == 1 {
+			//only one
+			oneconf = confList[0]
+			break
+		}
+		//create instance info log.
+		buf := bytes.NewBuffer(nil)
+		for idx, conf := range confList {
+			fmt.Fprintf(buf, "%v\t%v\t%v\n", idx, conf["name"], conf["pwd"])
+		}
+		//
+		var rbuf = make([]byte, 1024)
+		var key string
+		for {
+			buf.WriteTo(os.Stdout)
+			fmt.Fprintf(os.Stdout, "Please select one(type r to reload)[0]:")
+			readed, _ := os.Stdin.Read(rbuf)
+			key = string(rbuf[:readed])
+			if key == "r" {
+				//reload instance info from file.
+				break
+			}
+			if key == "\n" {
+				//reshow the read instance info
+				continue
+			}
+			idx, perr := strconv.ParseUint(key, 10, 32)
+			if perr == nil {
+				//select by index.
+				if len(confList) < int(idx) {
+					fmt.Fprintf(os.Stdout, "-error: %v index out of bounds\n", idx)
+					continue
+				}
+				oneconf = confList[idx]
+				break
+			}
+			//select by name
+			for _, conf := range confList {
+				name := fmt.Sprintf("%v", conf["name"])
+				if name == key {
+					oneconf = conf
+					break
+				}
+			}
+			if oneconf == nil {
+				fmt.Fprintf(os.Stdout, "-error: %v name not found\n", key)
+				continue
+			} else {
+				break
+			}
+		}
+		if key == "r" {
+			//want to reload
+			continue
+		}
+		if oneconf != nil {
+			break
+		}
 	}
-	return url, nil
-}
-
-func printUsage() {
-	fmt.Printf(`Usage: %v <mode> <arguemtns>
-	%v -s <listen address> <token by json format>
-	%v -c 
-`, os.Args[0], os.Args[0], os.Args[0])
+	var ok bool
+	pwd, ok = oneconf["pwd"].(string)
+	url, ok = oneconf["web_url"].(string)
+	if !ok {
+		err = fmt.Errorf("read fsck config file(%v),instance(%v) fail with %v", confPath, oneconf["pwd"], "web_url not configured")
+	}
+	return
 }
