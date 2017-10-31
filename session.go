@@ -52,7 +52,8 @@ func (s *Session) Write(p []byte) (n int, err error) {
 	// log.D("Session write data:%v", string(p))
 	buf := append(make([]byte, 3), p...)
 	binary.BigEndian.PutUint16(buf[1:], s.SID)
-	var waited int64
+	var waited time.Duration
+	var tempDelay time.Duration
 	for {
 		_, err = s.Out.Write(buf)
 		if err == nil {
@@ -72,10 +73,18 @@ func (s *Session) Write(p []byte) (n int, err error) {
 			// err = fmt.Errorf("remote session(%v) is not found", s.SID)
 			break
 		}
-		log.D("Sessiion(%v) send %v data fail with %v, will retry after %v", s.SID, len(buf), err, "500ms")
-		time.Sleep(500 * time.Millisecond)
-		waited += 100
-		if waited > 60000 {
+		if tempDelay == 0 {
+			tempDelay = 100 * time.Millisecond
+		} else {
+			tempDelay *= 2
+		}
+		if max := 8 * time.Second; tempDelay > max {
+			tempDelay = max
+		}
+		log.D("Sessiion(%v) send %v data fail with %v, will retry after %v", s.SID, len(buf), err, tempDelay)
+		time.Sleep(tempDelay)
+		waited += tempDelay
+		if waited > 60*time.Second {
 			log.W("Server wait channel on sid(%v) fail with timeout", s.SID)
 			err = io.EOF
 			//err = fmt.Errorf("timeout")
