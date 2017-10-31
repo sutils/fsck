@@ -14,7 +14,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sutils/readkey"
+
 	gwflog "github.com/Centny/gwf/log"
+
+	"github.com/Centny/gwf/netw/rc"
 
 	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
@@ -74,7 +78,7 @@ var ps1 string
 var instancePath string
 
 func regClientFlags(alias bool) {
-	flag.StringVar(&serverAddr, "server", "sctrl.srv:9234", "the sctrl server address")
+	flag.StringVar(&serverAddr, "server", "", "the sctrl server address")
 	flag.StringVar(&loginToken, "login", "", "the token for login to server")
 	flag.StringVar(&bash, "bash", "bash", "the control bash path")
 	flag.StringVar(&ps1, "ps1", "Sctrl \\W>", "the bash ps1")
@@ -217,10 +221,6 @@ func main() {
 		if help {
 			printClientUsage(0, name == "sctrl-client")
 		}
-		if len(serverAddr) < 1 || len(loginToken) < 1 {
-			flag.Usage()
-			os.Exit(1)
-		}
 		sctrlClient()
 	case name == "sctrl-slaver" || mode == "-sc":
 		regCommonFlags()
@@ -299,15 +299,87 @@ func sctrlSlaver() {
 }
 
 func sctrlClient() {
-	client := fsck.NewSlaver("client")
-	client.StartClient(serverAddr, util.UUID(), loginToken)
+	var err error
+	var conf = &WorkConf{}
+	var client *fsck.Slaver
+	var name = "Sctrl"
+	if len(serverAddr) < 1 {
+		pwd, _ := os.Getwd()
+		conf, err = ReadWorkConf(".sctrl.json")
+		if err != nil {
+			fmt.Printf("read %v/.sctrl.json fail, %v", pwd, err)
+			os.Exit(1)
+		}
+		serverAddr, loginToken = conf.SrvAddr, conf.Login
+		if len(serverAddr) < 1 {
+			fmt.Println("server config is empty")
+			flag.Usage()
+			os.Exit(1)
+		}
+		if len(conf.PS1) > 0 {
+			ps1 = conf.PS1
+		}
+		if len(conf.Bash) > 0 {
+			bash = conf.Bash
+		}
+		if len(conf.Instance) > 0 {
+			instancePath = conf.Instance
+		}
+		if len(conf.Name) > 0 {
+			name = conf.Name
+		}
+	}
+	if len(loginToken) < 1 {
+		for {
+			fmt.Printf("Login to %v: ", serverAddr)
+			buf := []byte{}
+			for {
+				key, err := readkey.ReadKey()
+				if err != nil || bytes.Equal(key, CharTerm) {
+					readkey.Close()
+					os.Exit(1)
+				}
+				if key[0] == '\r' {
+					fmt.Println()
+					break
+				}
+				buf = append(buf, key...)
+			}
+			loginToken = strings.TrimSpace(string(buf))
+			if len(loginToken) > 0 {
+				break
+			}
+		}
+	}
+	fmt.Printf("start %v by:\n  server:%v\n  bash:%v\n  ps1:%v\n  instance:%v\n",
+		name, serverAddr, bash, ps1, instancePath)
+	//
+	client = fsck.NewSlaver("client")
+	client.OnLogin = func(a *rc.AutoLoginH, err error) {
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			fmt.Printf("\nlogin to %v fail with %v\n", serverAddr, err)
+			readkey.Close()
+			os.Exit(1)
+		}
+	}
 	webcmd, _ := filepath.Abs(os.Args[0])
 	terminal := NewTerminal(client, ps1, bash, webcmd)
+	terminal.Name = name
 	terminal.InstancePath = instancePath
+
 	logout := NewNamedWriter("debug", terminal.Log)
 	log.SetOutput(logout)
 	gwflog.SetWriter(logout)
-	terminal.Proc()
+	//
+	fmt.Printf("start connect to %v\n", serverAddr)
+	err = client.StartClient(serverAddr, util.UUID(), loginToken)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fmt.Printf("%v is connected\n", serverAddr)
+	terminal.Proc(conf.Hosts...)
 }
 
 func sctrlExec(cmds string) {

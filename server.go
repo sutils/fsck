@@ -257,6 +257,7 @@ type Slaver struct {
 	R       *rc.RC_Runner_m
 	SP      *SessionPool
 	Channel *Channel
+	OnLogin func(a *rc.AutoLoginH, err error)
 }
 
 func NewSlaver(alias string) *Slaver {
@@ -276,6 +277,7 @@ func (s *Slaver) StartClient(rcaddr, session, token string) (err error) {
 
 func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	auto := rc.NewAutoLoginH(token)
+	auto.OnLogin = s.OnLogin
 	auto.Args = util.Map{
 		"alias":   s.Alias,
 		"ctype":   ctype,

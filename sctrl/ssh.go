@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -107,6 +108,9 @@ type SshHost struct {
 }
 
 func ParseSshHost(name, uri string) (host *SshHost, err error) {
+	if !regexp.MustCompile("^.*://.*$").MatchString(uri) {
+		uri = "master://" + uri
+	}
 	ruri, err := url.Parse(uri)
 	if err != nil {
 		return
@@ -115,13 +119,23 @@ func ParseSshHost(name, uri string) (host *SshHost, err error) {
 	if !strings.Contains(suri, ":") {
 		suri = suri + ":22"
 	}
+	channel := ruri.Scheme
+	if len(channel) < 1 {
+		channel = "master"
+	}
 	host = &SshHost{
 		Name:    name,
 		URI:     suri,
-		Channel: ruri.Scheme,
+		Channel: channel,
 	}
-	host.Username = ruri.User.Username()
-	host.Password, _ = ruri.User.Password()
+	if ruri.User != nil {
+		host.Username = ruri.User.Username()
+		host.Password, _ = ruri.User.Password()
+	}
+	pty := ruri.Query().Get("pty")
+	if len(pty) > 0 {
+		host.Pty = pty
+	}
 	return
 }
 

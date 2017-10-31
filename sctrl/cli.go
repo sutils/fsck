@@ -98,6 +98,7 @@ type Terminal struct {
 	WebCmd       string //the web cmd path
 	CmdPrefix    string
 	InstancePath string
+	Name         string
 	//
 	selected  []string
 	activited Shell
@@ -126,6 +127,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 		tasks:        map[string]*Task{},
 		taskLck:      sync.RWMutex{},
 		InstancePath: "/tmp/.sctrl_instance.json",
+		Name:         "Sctrl",
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
@@ -422,7 +424,7 @@ func (t *Terminal) handleCallback() {
 }
 
 func (t *Terminal) NotifyTitle() {
-	fmt.Fprintf(os.Stdout, "\033]0;%v %v session\a", t.Cmd.Name, t.ss.Len())
+	fmt.Fprintf(os.Stdout, "\033]0;%v %v session\a", t.Name, t.ss.Len())
 }
 
 func (t *Terminal) Activate(shell Shell) {
@@ -532,6 +534,8 @@ func (t *Terminal) AddSession(name, uri string, connect bool) (err error) {
 	if err != nil {
 		return
 	}
+	fmt.Printf("add session by name(%v),channel(%v),host(%v),username(%v),password(%v)\n",
+		host.Name, host.Channel, host.URI, host.Username, host.Password)
 	session := NewSshSession(t.C, host)
 	session.EnableCallback([]byte(t.CmdPrefix), t.callback)
 	session.Add(NewNamedWriter(name, t.Log))
@@ -556,7 +560,12 @@ func (t *Terminal) SaveConf() {
 		json.Unmarshal(data, &conf)
 	}
 	pwd, _ := os.Getwd()
-	_, name := filepath.Split(pwd)
+	var name string
+	if len(t.Name) > 0 && t.Name != "Sctrl" {
+		name = t.Name
+	} else {
+		_, name = filepath.Split(pwd)
+	}
 	newone := map[string]interface{}{
 		"web_url": t.WebSrv.URL,
 		"pwd":     pwd,
@@ -586,7 +595,7 @@ func (t *Terminal) SaveConf() {
 	log.Printf("save instance info to %v success", t.InstancePath)
 }
 
-func (t *Terminal) Proc() (err error) {
+func (t *Terminal) Proc(hosts ...*Host) (err error) {
 	//initial
 	t.WebSrv.Start()
 	log.Printf("listen web on %v", t.WebSrv.URL)
@@ -599,12 +608,23 @@ func (t *Terminal) Proc() (err error) {
 	}
 	t.SaveConf()
 	//
-	//
-	t.Switch(t.Cmd.Name)
 	t.NotifyTitle()
 	//
 	go t.handleCallback()
 	//
+	for _, host := range hosts {
+		if len(host.Name) < 1 || len(host.URI) < 1 {
+			fmt.Printf("host conf %v is not correct,name/uri must be setted\n", MarshalAll(host))
+			continue
+		}
+		err := t.AddSession(host.Name, host.URI, host.Startup > 0)
+		if err != nil {
+			fmt.Printf("add session fail with %v\n", err)
+		}
+	}
+	//
+	//
+	t.Switch(t.Cmd.Name)
 	//
 	var key []byte
 	t.running = true

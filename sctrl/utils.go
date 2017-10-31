@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/list"
+	"encoding/json"
 	"io"
 	"strings"
 	"sync"
@@ -152,4 +153,9 @@ func JoinArgs(cmd string, args ...string) string {
 		}
 	}
 	return strings.Join(nargs, " ")
+}
+
+func MarshalAll(v interface{}) string {
+	bys, _ := json.Marshal(v)
+	return string(bys)
 }
