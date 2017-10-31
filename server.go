@@ -3,8 +3,8 @@ package fsck
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 	"sync"
+	"time"
 
 	"github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/netw"
@@ -23,13 +23,45 @@ const (
 	TypeClient = "client"
 )
 
+type Server struct {
+	*Master
+	Local *Slaver
+}
+
+func NewServer() *Server {
+	var srv = &Server{}
+	return srv
+}
+
+func (s *Server) Run(addr string, ts map[string]int) error {
+	s.Master = NewMaster()
+	if ts == nil {
+		ts = map[string]int{}
+	}
+	token := util.UUID()
+	ts[token] = 1
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		s.Local = NewSlaver("local")
+		err := s.Local.StartSlaver(addr, "master", token)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	err := s.Master.Run(addr, ts)
+	if err == nil {
+		s.Master.Wait()
+	}
+	return err
+}
+
 type Master struct {
 	L       *rc.RC_Listener_m
 	slck    sync.RWMutex
 	slavers map[string]string //slaver name map to connect id
-	clients map[string]string //client name map to connect id
-	msids   map[uint16]string //message sid map to channel sid
-	csids   map[string]string //channel sid map to connect id
+	clients map[string]string //client session map to connect id
+	ni2s    map[string]string //mapping <name-sid> to session
+	si2n    map[string]string //mapping <session-sid> to name
 }
 
 func NewMaster() *Master {
@@ -37,8 +69,8 @@ func NewMaster() *Master {
 		slck:    sync.RWMutex{},
 		slavers: map[string]string{},
 		clients: map[string]string{},
-		msids:   map[uint16]string{},
-		csids:   map[string]string{},
+		ni2s:    map[string]string{},
+		si2n:    map[string]string{},
 	}
 	return srv
 }
@@ -49,7 +81,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.LCH = m
 	m.L.AddToken(ts)
 	m.L.RCBH.AddF(ChannelCmdS, m.OnChannelCmd)
-	m.L.AddHFunc("dail", m.DailH)
+	m.L.AddHFunc("dial", m.DailH)
 	err = m.L.Run()
 	return
 }
@@ -58,8 +90,8 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	name := rc.StrVal("name")
 	ctype := rc.StrVal("ctype")
 	session := rc.StrVal("session")
-	if len(name) < 1 || len(ctype) < 1 {
-		err = fmt.Errorf("name/ctype is required")
+	if len(ctype) < 1 {
+		err = fmt.Errorf("ctype is required")
 	}
 	cid, err = m.L.RCH.OnLogin(rc, token)
 	if err != nil {
@@ -71,8 +103,8 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 		old = m.slavers[name]
 		m.slavers[name] = cid
 	} else if ctype == TypeClient {
-		m.clients[name] = cid
-		m.csids[session] = cid
+		old = m.clients[session]
+		m.clients[session] = cid
 	} else {
 		err = fmt.Errorf("the ctype must be in slaver/client")
 		m.slck.Unlock()
@@ -87,7 +119,7 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	if oldCmd != nil {
 		oldCmd.Close()
 	}
-	log.D("Master accept %v connect by session(%v),name(%v) from %v", ctype, session, name)
+	log.D("Master accept %v connect by session(%v),name(%v) from %v", ctype, session, name, rc.RemoteAddr())
 	return
 }
 
@@ -112,7 +144,7 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		err = fmt.Errorf("the channel is not found by name(%v)", name)
 		return
 	}
-	res, err := cmdc.Exec_m("dail", util.Map{
+	res, err := cmdc.Exec_m("dial", util.Map{
 		"uri":  uri,
 		"name": name,
 	})
@@ -121,11 +153,13 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	}
 	sid := uint16(res.IntVal("sid"))
 	session := rc.Kvs().StrVal("session")
+
 	m.slck.Lock()
-	m.msids[sid] = session
+	m.ni2s[fmt.Sprintf("%v-%v", name, sid)] = session
+	m.si2n[fmt.Sprintf("%v-%v", session, sid)] = name
 	m.slck.Unlock()
 	val = res
-	log.D("Master dail to %v on channel(%v),session(%v) success with sid(%v)", uri, name, session, sid)
+	log.D("Master dial to %v on channel(%v),session(%v) success with sid(%v)", uri, name, session, sid)
 	return
 }
 
@@ -136,7 +170,9 @@ func (m *Master) OnChannelCmd(c netw.Cmd) int {
 		return -1
 	}
 	ctype := c.Kvs().StrVal("ctype")
-	log.D("Master recieve %v data from %v", len(data), ctype)
+	if ShowLog > 1 {
+		log.D("Master recieve %v data from %v", len(data), ctype)
+	}
 	if ctype == TypeSlaver {
 		return m.OnSlaverCmd(c)
 	}
@@ -144,12 +180,17 @@ func (m *Master) OnChannelCmd(c netw.Cmd) int {
 }
 
 func (m *Master) OnSlaverCmd(c netw.Cmd) int {
+	name := c.Kvs().StrVal("name")
 	data := c.Data()
 	sid := binary.BigEndian.Uint16(data[1:])
 	m.slck.RLock()
-	csid := m.msids[sid]
-	cid := m.csids[csid]
+	session := m.ni2s[fmt.Sprintf("%v-%v", name, sid)]
+	cid := m.clients[session]
 	m.slck.RUnlock()
+	if len(session) < 1 {
+		c.Writeb([]byte(ErrSessionNotFound.Error()))
+		return 0
+	}
 	cmdc := m.L.CmdC(cid)
 	if cmdc == nil {
 		c.Writeb([]byte("client not found"))
@@ -166,10 +207,17 @@ func (m *Master) OnSlaverCmd(c netw.Cmd) int {
 }
 
 func (m *Master) OnClientCmd(c netw.Cmd) int {
-	name := c.Kvs().StrVal("name")
+	session := c.Kvs().StrVal("session")
+	data := c.Data()
+	sid := binary.BigEndian.Uint16(data[1:])
 	m.slck.RLock()
+	name := m.si2n[fmt.Sprintf("%v-%v", session, sid)]
 	cid := m.slavers[name]
 	m.slck.RUnlock()
+	if len(name) < 1 {
+		c.Writeb([]byte(ErrSessionNotFound.Error()))
+		return 0
+	}
 	cmdc := m.L.CmdC(cid)
 	if cmdc == nil {
 		c.Writeb([]byte("slaver not found"))
@@ -218,12 +266,22 @@ func NewSlaver(alias string) *Slaver {
 	}
 }
 
-func (s *Slaver) Start(rcaddr, name, token, ctype string) (err error) {
+func (s *Slaver) StartSlaver(rcaddr, name, token string) (err error) {
+	return s.Start(rcaddr, name, "", token, TypeSlaver)
+}
+
+func (s *Slaver) StartClient(rcaddr, session, token string) (err error) {
+	return s.Start(rcaddr, "", session, token, TypeClient)
+}
+
+func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	auto := rc.NewAutoLoginH(token)
 	auto.Args = util.Map{
-		"name":  name,
-		"alias": s.Alias,
-		"ctype": ctype,
+		"alias":   s.Alias,
+		"ctype":   ctype,
+		"token":   token,
+		"name":    name,
+		"session": session,
 	}
 	s.R = rc.NewRC_Runner_m_j(pool.BP, rcaddr, netw.NewCCH(netw.NewQueueConH(auto, s), s))
 	s.R.Name = s.Alias
@@ -233,8 +291,8 @@ func (s *Slaver) Start(rcaddr, name, token, ctype string) (err error) {
 	return s.R.Valid()
 }
 
-func (s *Slaver) Bind(raw io.ReadWriteCloser, name, uri string) (session *Session, err error) {
-	return s.Channel.Bind(raw, name, uri)
+func (s *Slaver) DialSession(name, uri string) (session *Session, err error) {
+	return s.Channel.DialSession(name, uri)
 }
 
 //OnConn see ConHandler for detail
@@ -253,6 +311,10 @@ func (s *Slaver) OnCmd(con netw.Cmd) int {
 	return 0
 }
 
+func (s *Slaver) Close() error {
+	return s.R.Close()
+}
+
 type Channel struct {
 	BH *impl.OBDH
 	RC *impl.RC_Con
@@ -269,7 +331,7 @@ func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S
 		RS: rs,
 		SP: sp,
 	}
-	channel.RS.AddHFunc("dail", channel.DailH)
+	channel.RS.AddHFunc("dial", channel.DialH)
 	channel.BH.AddF(ChannelCmdC, channel.OnMasterCmd)
 	return channel
 }
@@ -279,7 +341,7 @@ func (c *Channel) ExecBytes(args []byte) (reply []byte, err error) {
 	return
 }
 
-func (c *Channel) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	var uri string
 	err = rc.ValidF(`
 		uri,R|S,L:0;
@@ -295,16 +357,18 @@ func (c *Channel) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		"uri": uri,
 		"sid": session.SID,
 	}
+	log.D("Channel create session by uri(%v) is success with sid(%v)", uri, session.SID)
 	return
 }
 
-func (c *Channel) Dail(name, uri string) (sid uint16, err error) {
-	res, err := c.RM.Exec_m("dail", util.Map{
+func (c *Channel) Dial(name, uri string) (sid uint16, err error) {
+	res, err := c.RM.Exec_m("dial", util.Map{
 		"uri":  uri,
 		"name": name,
 	})
 	if err == nil {
 		sid = uint16(res.IntVal("sid"))
+		log.D("Channel dial to %v by name(%v) success with sid(%v)", uri, name, sid)
 	}
 	return
 }
@@ -335,7 +399,9 @@ func (c *Channel) Write(p []byte) (n int, err error) {
 }
 
 func (c *Channel) OnMasterCmd(cmd netw.Cmd) int {
-	_, err := c.SP.Write(cmd.Data())
+	data := cmd.Data()
+	// log.D("Channel receive %v data from %v", len(data), cmd.RemoteAddr())
+	_, err := c.SP.Write(data)
 	if err == nil {
 		cmd.Writev([]byte(OK))
 	} else {
@@ -344,10 +410,10 @@ func (c *Channel) OnMasterCmd(cmd netw.Cmd) int {
 	return 0
 }
 
-func (c *Channel) Bind(raw io.ReadWriteCloser, name, uri string) (session *Session, err error) {
-	sid, err := c.Dail(name, uri)
+func (c *Channel) DialSession(name, uri string) (session *Session, err error) {
+	sid, err := c.Dial(name, uri)
 	if err == nil {
-		session = c.SP.Start(raw, sid, c)
+		session = c.SP.Start(sid, c)
 		log.D("Channel dial to %v on channel(%v) success with %v", uri, name, sid)
 	}
 	return

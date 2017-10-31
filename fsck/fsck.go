@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	gwflog "github.com/Centny/gwf/log"
+
+	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
 )
 
@@ -82,6 +85,21 @@ func regClientFlags(alias bool) {
 }
 
 //
+//sctrl-slaver argument
+var masterAddr string
+var slaverToken string
+var slaverName string
+
+func regSlaverFlags(alias bool) {
+	flag.StringVar(&masterAddr, "master", "sctrl.srv:9234", "the sctrl master server address")
+	flag.StringVar(&slaverToken, "auth", "", "the token for login to server")
+	flag.StringVar(&slaverName, "name", "", "the slaver name")
+	if !alias {
+		flag.BoolVar(&runClient, "sc", false, "run as slaver client")
+	}
+}
+
+//
 //sctrl-exec argument
 func regExecFlags(alias bool) {
 	if !alias {
@@ -93,6 +111,7 @@ func printAllUsage(code int) {
 	regClientFlags(false)
 	regCommonFlags()
 	regServerFlags(false)
+	regSlaverFlags(false)
 	regExecFlags(false)
 	flag.Usage()
 	os.Exit(code)
@@ -124,6 +143,21 @@ func printClientUsage(code int, alias bool) {
 		fmt.Fprintf(os.Stderr, "        %v -c -server sctrl.srv:9423 -login abc\n", name)
 	}
 	fmt.Fprintf(os.Stderr, "Client options:\n")
+	flag.PrintDefaults()
+	os.Exit(code)
+}
+
+func printSlaverUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -master sctrl.srv:9423 -auth abc -name x1\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -c [option]\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -c -master sctrl.srv:9423 -auth abc -name x1\n", name)
+	}
+	fmt.Fprintf(os.Stderr, "Slaver options:\n")
 	flag.PrintDefaults()
 	os.Exit(code)
 }
@@ -181,13 +215,25 @@ func main() {
 		regClientFlags(name == "sctrl-client")
 		flag.Parse()
 		if help {
-			printClientUsage(0, name == "sctrl-server")
+			printClientUsage(0, name == "sctrl-client")
 		}
 		if len(serverAddr) < 1 || len(loginToken) < 1 {
 			flag.Usage()
 			os.Exit(1)
 		}
 		sctrlClient()
+	case name == "sctrl-slaver" || mode == "-sc":
+		regCommonFlags()
+		regSlaverFlags(name == "sctrl-slaver")
+		flag.Parse()
+		if help {
+			printSlaverUsage(0, name == "sctrl-slaver")
+		}
+		if len(masterAddr) < 1 || len(slaverToken) < 1 || len(slaverName) < 1 {
+			flag.Usage()
+			os.Exit(1)
+		}
+		sctrlSlaver()
 	case name == "sctrl-log" || mode == "-lc":
 		for _, arg := range os.Args {
 			if arg == "-h" {
@@ -231,25 +277,36 @@ func main() {
 
 func sctrlServer() {
 	log.Printf("start sctrl server by listen(%v),loglevel(%v),token(%v)", listen, loglevel, tokenList)
-	fsck.ShowLog = loglevel
+	// fsck.ShowLog = loglevel
 	tokens := map[string]int{}
 	for _, token := range tokenList {
 		tokens[token] = 1
 	}
-	server, err := fsck.NewServer(listen, tokens)
+	server := fsck.NewServer()
+	err := server.Run(listen, tokens)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	server.Run()
+	fmt.Println(err)
+}
+
+func sctrlSlaver() {
+	slaver := fsck.NewSlaver("slaver")
+	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
+	wait := make(chan int)
+	<-wait
 }
 
 func sctrlClient() {
+	client := fsck.NewSlaver("client")
+	client.StartClient(serverAddr, util.UUID(), loginToken)
 	webcmd, _ := filepath.Abs(os.Args[0])
-	client := fsck.NewClient(serverAddr, loginToken)
 	terminal := NewTerminal(client, ps1, bash, webcmd)
 	terminal.InstancePath = instancePath
-	log.SetOutput(NewNamedWriter("debug", terminal.Log))
+	logout := NewNamedWriter("debug", terminal.Log)
+	log.SetOutput(logout)
+	gwflog.SetWriter(logout)
 	terminal.Proc()
 }
 

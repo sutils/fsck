@@ -11,6 +11,8 @@ import (
 	"github.com/Centny/gwf/log"
 )
 
+var ShowLog int
+
 const (
 	SS_NEW    = 20
 	SS_NORMAL = 0
@@ -23,44 +25,83 @@ var ErrSessionClosed = fmt.Errorf("-session:closed")
 var OK = "ok"
 
 type Session struct {
-	Raw io.ReadWriteCloser
-	SID uint16
+	io.ReadWriteCloser
+	reader io.ReadCloser
+	Raw    io.WriteCloser
+	Out    io.Writer
+	SID    uint16
 }
 
-func (s *Session) runRead(w io.Writer) {
-	buf := make([]byte, 40960)
-	buf[0] = 0
+func NewSession(sid uint16, out io.Writer, raw io.WriteCloser) *Session {
+	var reader io.ReadCloser
+	var writer io.WriteCloser
+	if raw == nil {
+		reader, writer = io.Pipe()
+	} else {
+		writer = raw
+	}
+	return &Session{
+		SID:    sid,
+		Out:    out,
+		reader: reader,
+		Raw:    writer,
+	}
+}
+
+func (s *Session) Write(p []byte) (n int, err error) {
+	// log.D("Session write data:%v", string(p))
+	buf := append(make([]byte, 3), p...)
 	binary.BigEndian.PutUint16(buf[1:], s.SID)
+	var waited int64
 	for {
-		readed, err := s.Raw.Read(buf[3:])
-		if err != nil {
+		_, err = s.Out.Write(buf)
+		if err == nil {
 			break
 		}
-		var waited int64
-		for {
-			_, err = w.Write(buf[:readed+3])
-			if err == nil {
-				break
-			}
-			if err == ErrSessionClosed {
-				log.D("remote session(%v) is closed")
-				break
-			}
-			if err == ErrSessionNotFound {
-				log.D("remote session(%v) is not found")
-				break
-			}
-			log.D("Sessiion(%v) send %v data fail with %v, will retry after %v", s.SID, readed+3, err, "500ms")
-			time.Sleep(500 * time.Millisecond)
-			waited += 100
-			if waited > 60000 {
-				log.W("Server wait channel on sid(%v) fail with timeout", s.SID)
-				break
-			}
+		if err == ErrSessionClosed {
+			log.D("remote session(%v) is closed", s.SID)
+			s.Close()
+			err = io.EOF
+			// err = fmt.Errorf("remote session(%v) is closed", s.SID)
+			break
 		}
-
+		if err == ErrSessionNotFound {
+			log.D("remote session(%v) is not found", s.SID)
+			s.Close()
+			err = io.EOF
+			// err = fmt.Errorf("remote session(%v) is not found", s.SID)
+			break
+		}
+		log.D("Sessiion(%v) send %v data fail with %v, will retry after %v", s.SID, len(buf), err, "500ms")
+		time.Sleep(500 * time.Millisecond)
+		waited += 100
+		if waited > 60000 {
+			log.W("Server wait channel on sid(%v) fail with timeout", s.SID)
+			err = io.EOF
+			//err = fmt.Errorf("timeout")
+			s.Close()
+			break
+		}
 	}
-	s.Raw.Close()
+	n = len(p)
+	return
+}
+
+func (s *Session) Read(p []byte) (n int, err error) {
+	if s.reader == nil {
+		panic("raw write mode is not having reader")
+	}
+	n, err = s.reader.Read(p)
+	return
+}
+
+func (s *Session) writeToReader(p []byte) (n int, err error) {
+	n, err = s.Raw.Write(p)
+	return
+}
+
+func (s *Session) Close() error {
+	return s.Raw.Close()
 }
 
 type SessionPool struct {
@@ -76,7 +117,7 @@ func NewSessionPool() *SessionPool {
 	}
 }
 
-func (s *SessionPool) Dail(uri string, w io.Writer) (session *Session, err error) {
+func (s *SessionPool) Dail(uri string, out io.Writer) (session *Session, err error) {
 	raw, err := net.Dial("tcp", uri)
 	if err != nil {
 		return
@@ -85,20 +126,25 @@ func (s *SessionPool) Dail(uri string, w io.Writer) (session *Session, err error
 	defer s.lck.Unlock()
 	s.sidc++
 	sid := s.sidc
-	session = s.start(raw, sid, w)
+	session = s.start(sid, out, raw)
+	go func() {
+		io.Copy(session, raw)
+		session.Close()
+		raw.Close()
+		s.Remove(sid)
+	}()
 	return
 }
 
-func (s *SessionPool) Start(raw io.ReadWriteCloser, sid uint16, w io.Writer) (session *Session) {
+func (s *SessionPool) Start(sid uint16, out io.Writer) (session *Session) {
 	s.lck.Lock()
 	defer s.lck.Unlock()
-	return s.start(raw, sid, w)
+	return s.start(sid, out, nil)
 }
 
-func (s *SessionPool) start(raw io.ReadWriteCloser, sid uint16, w io.Writer) (session *Session) {
-	session = &Session{Raw: raw, SID: sid}
+func (s *SessionPool) start(sid uint16, out io.Writer, raw io.WriteCloser) (session *Session) {
+	session = NewSession(sid, out, raw)
 	s.ss[sid] = session
-	go session.runRead(w)
 	return
 }
 
@@ -114,7 +160,7 @@ func (s *SessionPool) Remove(sid uint16) (session *Session) {
 	defer s.lck.Unlock()
 	session, _ = s.ss[sid]
 	if session != nil {
-		session.Raw.Close()
+		session.Close()
 		delete(s.ss, sid)
 	}
 	return
@@ -131,7 +177,10 @@ func (s *SessionPool) Write(p []byte) (n int, err error) {
 		err = ErrSessionNotFound
 		return
 	}
-	n, err = session.Raw.Write(p[3:])
+	if ShowLog > 1 {
+		log.D("SessionPool send %v data to session(%v)", len(p)-3, sid)
+	}
+	n, err = session.writeToReader(p[3:])
 	if err != nil {
 		s.Remove(sid)
 		err = ErrSessionClosed

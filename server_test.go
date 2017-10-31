@@ -1,9 +1,7 @@
 package fsck
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net"
 	"testing"
 	"time"
@@ -19,36 +17,48 @@ func runEchoServer() {
 		if err != nil {
 			panic(err)
 		}
-		go io.Copy(con, con)
+		go func(c net.Conn) {
+			buf := make([]byte, 1024)
+			readed, err := c.Read(buf)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("read=>%v\n", buf[:readed])
+			_, err = c.Write(buf[:readed])
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("send=>%v\n", buf[:readed])
+		}(con)
 	}
 }
 
-type buffer struct {
-	r     io.ReadCloser
-	W     io.Writer
-	Reply *bytes.Buffer
-}
+// type buffer struct {
+// 	r     io.ReadCloser
+// 	W     io.Writer
+// 	Reply *bytes.Buffer
+// }
 
-func Newbuffer() *buffer {
-	r, w := io.Pipe()
-	return &buffer{
-		r:     r,
-		W:     w,
-		Reply: bytes.NewBuffer(nil),
-	}
-}
+// func Newbuffer() *buffer {
+// 	r, w := io.Pipe()
+// 	return &buffer{
+// 		r:     r,
+// 		W:     w,
+// 		Reply: bytes.NewBuffer(nil),
+// 	}
+// }
 
-func (b *buffer) Write(p []byte) (n int, err error) {
-	return b.Reply.Write(p)
-}
+// func (b *buffer) Write(p []byte) (n int, err error) {
+// 	return b.Reply.Write(p)
+// }
 
-func (b *buffer) Read(p []byte) (n int, err error) {
-	return b.r.Read(p)
-}
+// func (b *buffer) Read(p []byte) (n int, err error) {
+// 	return b.r.Read(p)
+// }
 
-func (b *buffer) Close() error {
-	return b.r.Close()
-}
+// func (b *buffer) Close() error {
+// 	return b.r.Close()
+// }
 
 func TestRc(t *testing.T) {
 	// netw.ShowLog = true
@@ -58,35 +68,34 @@ func TestRc(t *testing.T) {
 	go master.Run(":9372", map[string]int{"abc": 1})
 	time.Sleep(time.Second)
 	slaver := NewSlaver("abc1")
-	err := slaver.Start("localhost:9372", "x", "abc", TypeSlaver)
+	err := slaver.StartSlaver("localhost:9372", "x", "abc")
 	if err != nil {
 		t.Error("error")
 		return
 	}
 	client := NewSlaver("abc2")
-	err = client.Start("localhost:9372", "x", "abc", TypeClient)
+	err = client.StartClient("localhost:9372", "xxxx", "abc")
 	if err != nil {
 		t.Error("error")
 		return
 	}
 	time.Sleep(time.Second)
 	//
-	buf := Newbuffer()
-	_, err = client.Bind(buf, "x", "localhost:9392")
+	session, err := client.DialSession("x", "localhost:9392")
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	fmt.Fprintf(buf.W, "m1")
-	for {
-		reply := string(buf.Reply.Bytes())
-		if reply != "m1" {
-			fmt.Println("receive->", reply)
-			time.Sleep(time.Second)
-			continue
-		} else {
-			break
-		}
+	fmt.Fprintf(session, "m1")
+	buf := make([]byte, 1024)
+	readed, err := session.Read(buf)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if string(buf[:readed]) != "m1" {
+		t.Error("error")
+		return
 	}
 	time.Sleep(2 * time.Second)
 }

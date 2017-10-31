@@ -92,7 +92,7 @@ type Terminal struct {
 	Log          *WebLogger
 	last         string
 	running      bool
-	C            *fsck.Client
+	C            *fsck.Slaver
 	Mux          *http.ServeMux
 	WebSrv       *httptest.Server
 	WebCmd       string //the web cmd path
@@ -110,7 +110,7 @@ type Terminal struct {
 	taskLck sync.RWMutex
 }
 
-func NewTerminal(c *fsck.Client, ps1, shell, webcmd string) *Terminal {
+func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	term := &Terminal{
 		// ss:        map[string]*SshSession{},
 		ss:           list.New(),
