@@ -21,6 +21,7 @@ import (
 	"log"
 	"path/filepath"
 
+	"github.com/Centny/gwf/util"
 	"github.com/sutils/readkey"
 )
 
@@ -148,6 +149,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	fmt.Fprintf(prefix, "alias seval='%v -run seval'\n", webcmd)
 	fmt.Fprintf(prefix, "alias saddmap='%v -run saddmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias srmmap='%v -run srmmap'\n", webcmd)
+	fmt.Fprintf(prefix, "alias smaster='%v -run smaster'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
@@ -328,6 +330,27 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		}
 		err = t.Forward.Stop(cmds[1], len(cmds) > 2 && cmds[2] == "connected")
 		data = "ok\n"
+		return
+	case "smaster":
+		var res util.Map
+		res, err = t.C.List()
+		if err != nil {
+			return
+		}
+		buf := bytes.NewBuffer(nil)
+		slaver := res.MapVal("slaver")
+		fmt.Fprintf(buf, "Slaver:\n")
+		for name, status := range slaver {
+			fmt.Fprintf(buf, "  %10s   %v\n", name, status)
+		}
+		fmt.Fprintf(buf, "\n")
+		client := res.MapVal("client")
+		fmt.Fprintf(buf, "Client:\n")
+		for session, status := range client {
+			fmt.Fprintf(buf, "  %24s   %v\n", session, status)
+		}
+		fmt.Fprintf(buf, "\n")
+		data = buf.Bytes()
 		return
 	case "shelp":
 		fallthrough

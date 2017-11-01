@@ -93,6 +93,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.RCBH.AddF(ChannelCmdS, m.OnChannelCmd)
 	m.L.AddHFunc("dial", m.DailH)
 	m.L.AddHFunc("close", m.CloseH)
+	m.L.AddHFunc("list", m.ListH)
 	err = m.L.Run()
 	return
 }
@@ -175,6 +176,34 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	m.slck.Unlock()
 	val = res
 	log.D("Master dial to %v on channel(%v),session(%v) success with sid(%v)", uri, name, session, sid)
+	return
+}
+
+func (m *Master) ListH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	m.slck.RLock()
+	defer m.slck.RUnlock()
+	var slavers = util.Map{}
+	for name, cid := range m.slavers {
+		cmdc := m.L.CmdC(cid)
+		if cmdc == nil {
+			slavers[name] = "offline"
+		} else {
+			slavers[name] = "ok->" + cmdc.RemoteAddr().String()
+		}
+	}
+	var clients = util.Map{}
+	for session, cid := range m.clients {
+		cmdc := m.L.CmdC(cid)
+		if cmdc == nil {
+			clients[session] = "offline"
+		} else {
+			clients[session] = "ok->" + cmdc.RemoteAddr().String()
+		}
+	}
+	val = util.Map{
+		"slaver": slavers,
+		"client": clients,
+	}
 	return
 }
 
@@ -371,6 +400,10 @@ func (s *Slaver) CloseSession(sid uint16) (err error) {
 	return s.Channel.Close(sid)
 }
 
+func (s *Slaver) List() (res util.Map, err error) {
+	return s.Channel.List()
+}
+
 //OnConn see ConHandler for detail
 func (s *Slaver) OnConn(con netw.Con) bool {
 	//fmt.Println("master is connected")
@@ -486,6 +519,11 @@ func (c *Channel) Dial(name, uri string) (sid uint16, err error) {
 		sid = uint16(res.IntVal("sid"))
 		log.D("Channel dial to %v by name(%v) success with sid(%v)", uri, name, sid)
 	}
+	return
+}
+
+func (c *Channel) List() (res util.Map, err error) {
+	res, err = c.RM.Exec_m("list", util.Map{})
 	return
 }
 

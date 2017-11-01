@@ -93,6 +93,10 @@ var srmmapUsage = NewUsage("Sctrl srmmap version %v\n", Version).
 	Append("  name\n").
 	Append("       the forward alias\n")
 
+var smasterUsage = NewUsage("Sctrl smaster version %v\n", Version).
+	Append("       smaster will show the master status\n").
+	Append("Usage: smaster\n")
+
 var shelpUsage = NewUsage("Sctrl version %v\n", Version).
 	Append("       sctrl console is helpful tool to manager multi host in inner network.\n").
 	Append("Supported:\n").
@@ -103,4 +107,5 @@ var shelpUsage = NewUsage("Sctrl version %v\n", Version).
 	Append("\n%v\n", sexeclUsage).
 	Append("\n%v\n", sevalUsage).
 	Append("\n%v\n", saddmapUsage).
-	Append("\n%v\n", srmmapUsage)
+	Append("\n%v\n", srmmapUsage).
+	Append("\n%v\n", smasterUsage)
