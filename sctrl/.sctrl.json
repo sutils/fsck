@@ -1,0 +1,15 @@
+{
+    "name": "Sctrl",
+    "server": "localhost:9234",
+    "login": "",
+    "bash": "/bin/bash",
+    "ps1": "Sctrl \\W>",
+    "instance": "/tmp/.sctrl_instance.json",
+    "hosts": [
+        {
+            "name": "loc",
+            "uri": "test://root:sco@loc.m?pty=vt100",
+            "startup": 1
+        }
+    ]
+}
