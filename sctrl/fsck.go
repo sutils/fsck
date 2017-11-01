@@ -59,6 +59,7 @@ var alias bool
 var webdavAddr string
 var webdavPath string
 var webdavUser string
+var hbdelay int
 
 //not alias argument
 var runClient bool
@@ -70,6 +71,7 @@ func regCommonFlags() {
 	flag.BoolVar(&help, "h", false, "show help")
 	flag.BoolVar(&alias, "alias", false, "alias command")
 	flag.IntVar(&loglevel, "loglevel", 0, "the log level")
+	flag.IntVar(&hbdelay, "hbdelay", 3000, "the heartbeat delay")
 	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
 	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
 	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
@@ -421,6 +423,7 @@ func sctrlSlaver() {
 	netw.ShowLog = loglevel > 0
 	impl.ShowLog = loglevel > 0
 	slaver := fsck.NewSlaver("slaver")
+	slaver.HbDelay = int64(hbdelay)
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
 	wait := make(chan int)
 	<-wait
@@ -487,6 +490,7 @@ func sctrlClient() {
 	//
 	login := make(chan int)
 	client = fsck.NewSlaver("client")
+	client.HbDelay = int64(hbdelay)
 	client.OnLogin = func(a *rc.AutoLoginH, err error) {
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)

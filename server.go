@@ -357,6 +357,7 @@ type Slaver struct {
 	R       *rc.RC_Runner_m
 	SP      *SessionPool
 	Channel *Channel
+	HbDelay int64
 	OnLogin func(a *rc.AutoLoginH, err error)
 }
 
@@ -390,6 +391,10 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	auto.Runner = s.R
 	s.Channel = NewChannel(s.R.RCBH, s.R.RCM_Con.RC_Con, s.R.RCM_Con, s.R.RCM_S, s.SP)
 	s.R.Start()
+	if s.HbDelay > 0 {
+		s.R.HbDelay = s.HbDelay
+		s.R.StartHbTimer()
+	}
 	return s.R.Valid()
 }
 
