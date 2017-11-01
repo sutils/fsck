@@ -401,8 +401,8 @@ func main() {
 func sctrlServer() {
 	log.Printf("start sctrl server by listen(%v),loglevel(%v),token(%v)", listen, loglevel, tokenList)
 	fsck.ShowLog = loglevel
-	netw.ShowLog = loglevel > 0
-	impl.ShowLog = loglevel > 0
+	netw.ShowLog = loglevel > 2
+	impl.ShowLog = loglevel > 3
 	//
 	//
 	tokens := map[string]int{}
@@ -420,8 +420,8 @@ func sctrlServer() {
 
 func sctrlSlaver() {
 	fsck.ShowLog = loglevel
-	netw.ShowLog = loglevel > 0
-	impl.ShowLog = loglevel > 0
+	netw.ShowLog = loglevel > 2
+	impl.ShowLog = loglevel > 3
 	slaver := fsck.NewSlaver("slaver")
 	slaver.HbDelay = int64(hbdelay)
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
@@ -431,8 +431,8 @@ func sctrlSlaver() {
 
 func sctrlClient() {
 	fsck.ShowLog = loglevel
-	netw.ShowLog = loglevel > 0
-	impl.ShowLog = loglevel > 0
+	netw.ShowLog = loglevel > 2
+	impl.ShowLog = loglevel > 3
 	var err error
 	var conf = &WorkConf{}
 	var client *fsck.Slaver

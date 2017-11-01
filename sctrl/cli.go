@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"log"
 	"path/filepath"
+	"time"
 
 	"github.com/Centny/gwf/util"
 	"github.com/sutils/readkey"
@@ -680,40 +681,53 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	//
 	var key []byte
 	t.running = true
+	keyin := make(chan []byte)
+	keydone := make(chan int)
+	go func() {
+		for t.running {
+			key := <-keyin
+			switch {
+			case bytes.Equal(key, KeyF1):
+				t.IdxSwitch(0)
+			case bytes.Equal(key, KeyF2):
+				t.IdxSwitch(1)
+			case bytes.Equal(key, KeyF3):
+				t.IdxSwitch(2)
+			case bytes.Equal(key, KeyF4):
+				t.IdxSwitch(3)
+			case bytes.Equal(key, KeyF5):
+				t.IdxSwitch(4)
+			case bytes.Equal(key, KeyF6):
+				t.IdxSwitch(5)
+			case bytes.Equal(key, KeyF7):
+				t.IdxSwitch(6)
+			case bytes.Equal(key, KeyF8):
+				t.IdxSwitch(7)
+			case bytes.Equal(key, KeyF9):
+				t.IdxSwitch(8)
+			case bytes.Equal(key, KeyF10):
+				t.IdxSwitch(9)
+			default:
+				_, err = t.activited.Write(key)
+				if err != nil {
+					fmt.Printf("%v session fail with %v\n", t.activited, err)
+				}
+			}
+			keydone <- 1
+		}
+	}()
 	for t.running {
 		key, err = readkey.ReadKey()
-		if err != nil {
+		if err != nil || bytes.Equal(key, CharTerm) {
 			t.CloseExit()
 			break
 		}
-		switch {
-		case bytes.Equal(key, CharTerm):
+		keyin <- key
+		select {
+		case <-keydone:
+		case <-time.After(8 * time.Second):
+			fmt.Printf("%v operationg timeout\n", t.activited)
 			t.CloseExit()
-		case bytes.Equal(key, KeyF1):
-			t.IdxSwitch(0)
-		case bytes.Equal(key, KeyF2):
-			t.IdxSwitch(1)
-		case bytes.Equal(key, KeyF3):
-			t.IdxSwitch(2)
-		case bytes.Equal(key, KeyF4):
-			t.IdxSwitch(3)
-		case bytes.Equal(key, KeyF5):
-			t.IdxSwitch(4)
-		case bytes.Equal(key, KeyF6):
-			t.IdxSwitch(5)
-		case bytes.Equal(key, KeyF7):
-			t.IdxSwitch(6)
-		case bytes.Equal(key, KeyF8):
-			t.IdxSwitch(7)
-		case bytes.Equal(key, KeyF9):
-			t.IdxSwitch(8)
-		case bytes.Equal(key, KeyF10):
-			t.IdxSwitch(9)
-		default:
-			_, err = t.activited.Write(key)
-			if err != nil {
-				fmt.Printf("%v session fail with %v\n", t.activited, err)
-			}
 		}
 	}
 	return
