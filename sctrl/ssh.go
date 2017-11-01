@@ -99,15 +99,16 @@ func (s *SshNetConn) SetWriteDeadline(t time.Time) error {
 // }
 
 type SshHost struct {
-	Name     string `json:"name"`
-	URI      string `json:"uri"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Channel  string `json:"channel"`
-	Pty      string `json:"pty"`
+	Name     string   `json:"name"`
+	URI      string   `json:"uri"`
+	Username string   `json:"username"`
+	Password string   `json:"password"`
+	Channel  string   `json:"channel"`
+	Pty      string   `json:"pty"`
+	Env      []string `json:"env"`
 }
 
-func ParseSshHost(name, uri string) (host *SshHost, err error) {
+func ParseSshHost(name, uri string, env map[string]interface{}) (host *SshHost, err error) {
 	if !regexp.MustCompile("^.*://.*$").MatchString(uri) {
 		uri = "master://" + uri
 	}
@@ -136,6 +137,9 @@ func ParseSshHost(name, uri string) (host *SshHost, err error) {
 	if len(pty) > 0 {
 		host.Pty = pty
 	}
+	for key, val := range env {
+		host.Env = append(host.Env, fmt.Sprintf("%v=%v", key, val))
+	}
 	return
 }
 
@@ -150,6 +154,7 @@ type SshSession struct {
 	client  *ssh.Client
 	session *ssh.Session
 	stdin   io.Writer
+	Prefix  io.Reader
 }
 
 func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
@@ -225,6 +230,15 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 		return
 	}
 	fmt.Printf("%v handshake success\n", s.Name)
+	s.MultiWriter.Disable = true
+	for _, env := range s.Env {
+		fmt.Fprintf(s.stdin, "%v\n", env)
+	}
+	if s.Prefix != nil {
+		_, err = io.Copy(s.stdin, s.Prefix)
+	}
+	time.Sleep(500 * time.Millisecond)
+	s.MultiWriter.Disable = false
 	s.Running = true
 	return
 }

@@ -100,6 +100,7 @@ type Terminal struct {
 	CmdPrefix    string
 	InstancePath string
 	Name         string
+	Env          []string
 	//
 	selected  []string
 	activited Shell
@@ -176,7 +177,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			err = saddUsage
 			return
 		}
-		err = t.AddSession(args[0], args[1], len(args) > 2 && args[2] == "connect")
+		err = t.AddSession(args[0], args[1], len(args) > 2 && args[2] == "connect", nil)
 		if err == nil {
 			data = fmt.Sprintf("sadd %v success\n", args[0])
 		} else {
@@ -532,7 +533,7 @@ func (t *Terminal) IdxSwitch(idx int) (switched bool) {
 	return
 }
 
-func (t *Terminal) AddSession(name, uri string, connect bool) (err error) {
+func (t *Terminal) AddSession(name, uri string, connect bool, env map[string]interface{}) (err error) {
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
 		if session.Name == name {
@@ -540,10 +541,11 @@ func (t *Terminal) AddSession(name, uri string, connect bool) (err error) {
 			return
 		}
 	}
-	host, err := ParseSshHost(name, uri)
+	host, err := ParseSshHost(name, uri, env)
 	if err != nil {
 		return
 	}
+	host.Env = append(t.Env, host.Env...)
 	fmt.Printf("add session by name(%v),channel(%v),host(%v),username(%v),password(%v)\n",
 		host.Name, host.Channel, host.URI, host.Username, host.Password)
 	session := NewSshSession(t.C, host)
@@ -615,6 +617,7 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	//initial
 	t.WebSrv.Start()
 	log.Printf("listen web on %v", t.WebSrv.URL)
+	t.Cmd.Env = append(t.Cmd.Env, t.Env...)
 	t.Cmd.AddEnvf("%v=%v", KeyWebCmdURL, t.WebSrv.URL)
 	t.Cmd.EnableCallback([]byte(t.CmdPrefix), t.callback)
 	t.Cmd.Add(NewNamedWriter(t.Cmd.Name, t.Log))
@@ -633,7 +636,7 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 			fmt.Printf("host conf %v is not correct,name/uri must be setted\n", MarshalAll(host))
 			continue
 		}
-		err := t.AddSession(host.Name, host.URI, host.Startup > 0)
+		err := t.AddSession(host.Name, host.URI, host.Startup > 0, host.Env)
 		if err != nil {
 			fmt.Printf("add session fail with %v\n", err)
 		}

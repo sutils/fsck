@@ -103,7 +103,8 @@ func Having(all []string, val string) bool {
 }
 
 type MultiWriter struct {
-	allws *list.List
+	allws   *list.List
+	Disable bool
 }
 
 func NewMultiWriter() *MultiWriter {
@@ -113,6 +114,10 @@ func NewMultiWriter() *MultiWriter {
 }
 
 func (m *MultiWriter) Write(p []byte) (n int, err error) {
+	if m.Disable {
+		n = len(p)
+		return
+	}
 	for em := m.allws.Front(); em != nil; em = em.Next() {
 		em.Value.(io.Writer).Write(p)
 	}

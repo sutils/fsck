@@ -9,7 +9,11 @@
         {
             "name": "loc",
             "uri": "test://root:sco@loc.m?pty=vt100",
-            "startup": 0
+            "startup": 0,
+            "env": {
+                "name1": "value2",
+                "name2": "value3"
+            }
         }
     ],
     "forward": [
@@ -18,5 +22,8 @@
             "local": ":2943",
             "remote": "test://loc.m:80"
         }
-    ]
+    ],
+    "env": {
+        "name1": "value1"
+    }
 }

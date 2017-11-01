@@ -418,6 +418,9 @@ func sctrlClient() {
 	terminal := NewTerminal(client, ps1, bash, webcmd)
 	terminal.Name = name
 	terminal.InstancePath = instancePath
+	for key, val := range conf.Env {
+		terminal.Env = append(terminal.Env, fmt.Sprintf("%v=%v", key, val))
+	}
 
 	logout := NewNamedWriter("debug", terminal.Log)
 	log.SetOutput(logout)
