@@ -109,8 +109,9 @@ func (s *Session) writeToReader(p []byte) (n int, err error) {
 	return
 }
 
-func (s *Session) Close() error {
-	return s.Raw.Close()
+func (s *Session) Close() (err error) {
+	err = s.Raw.Close()
+	return
 }
 
 type SessionPool struct {

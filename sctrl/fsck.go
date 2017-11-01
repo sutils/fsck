@@ -50,6 +50,9 @@ func (a *ArrayFlags) Set(value string) error {
 var loglevel int
 var help bool
 var alias bool
+var webdavAddr string
+var webdavPath string
+var webdavUser string
 
 //not alias argument
 var runClient bool
@@ -61,20 +64,17 @@ func regCommonFlags() {
 	flag.BoolVar(&help, "h", false, "show help")
 	flag.BoolVar(&alias, "alias", false, "alias command")
 	flag.IntVar(&loglevel, "loglevel", 0, "the log level")
+	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
+	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
+	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
 }
 
 //sctrl-server argument flags
 var listen string
 var tokenList ArrayFlags
-var webdavAddr string
-var webdavPath string
-var webdavUser string
 
 func regServerFlags(alias bool) {
 	flag.StringVar(&listen, "listen", ":9234", "the sctrl server listen address")
-	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
-	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
-	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
 	flag.Var(&tokenList, "token", "the auth token")
 	if !alias {
 		flag.BoolVar(&runServer, "s", false, "run as server")
@@ -85,6 +85,7 @@ func regServerFlags(alias bool) {
 //sctrl-client argument
 var serverAddr string
 var loginToken string
+var wsconf string
 var bash string
 var ps1 string
 var instancePath string
@@ -94,6 +95,7 @@ func regClientFlags(alias bool) {
 	flag.StringVar(&loginToken, "login", "", "the token for login to server")
 	flag.StringVar(&bash, "bash", "bash", "the control bash path")
 	flag.StringVar(&ps1, "ps1", "Sctrl \\W>", "the bash ps1")
+	flag.StringVar(&wsconf, "conf", ".sctrl.json", "the workspace configure file")
 	flag.StringVar(&instancePath, "instance", "/tmp/.sctrl_instance.json", "the path to save the sctrl instance configure info")
 	if !alias {
 		flag.BoolVar(&runClient, "c", false, "run as client")
@@ -251,6 +253,7 @@ func main() {
 		if len(listen) < 1 || len(tokenList) < 1 {
 			printServerUsage(1, alias || name == "sctrl-server")
 		}
+		go sctrlWebdav()
 		sctrlServer()
 	case name == "sctrl-client" || mode == "-c":
 		regCommonFlags()
@@ -259,6 +262,7 @@ func main() {
 		if help {
 			printClientUsage(0, alias || name == "sctrl-client")
 		}
+		go sctrlWebdav()
 		sctrlClient()
 	case name == "sctrl-slaver" || mode == "-sc":
 		regCommonFlags()
@@ -271,6 +275,7 @@ func main() {
 			flag.Usage()
 			os.Exit(1)
 		}
+		go sctrlWebdav()
 		sctrlSlaver()
 	case name == "sctrl-log" || mode == "-lc":
 		for _, arg := range os.Args {
@@ -321,44 +326,6 @@ func sctrlServer() {
 	log.Printf("start sctrl server by listen(%v),loglevel(%v),token(%v)", listen, loglevel, tokenList)
 	// fsck.ShowLog = loglevel
 	//
-	if len(webdavPath) > 0 {
-		webdav := &webdav.Handler{
-			Prefix:     "/dav",
-			FileSystem: webdav.Dir(webdavPath),
-			LockSystem: webdav.NewMemLS(),
-			Logger: func(req *http.Request, err error) {
-				if err == nil {
-					gwflog.D("Dav %v to %v success", req.Method, req.URL.Path)
-				} else {
-					gwflog.E("Dav %v to %v error %v", req.Method, req.URL.Path, err)
-				}
-			},
-		}
-		routing.Shared.HFilterFunc("^/.*$", func(hs *routing.HTTPSession) routing.HResult {
-			if len(webdavUser) < 1 {
-				return routing.HRES_CONTINUE
-			}
-			usr, pwd, ok := hs.R.BasicAuth()
-			if !ok {
-				hs.W.WriteHeader(403)
-				hs.W.Write([]byte("not access\n"))
-				return routing.HRES_RETURN
-			}
-			if fmt.Sprintf("%v:%v", usr, pwd) == webdavUser {
-				return routing.HRES_CONTINUE
-			}
-			hs.W.Write([]byte("not access\n"))
-			hs.W.WriteHeader(403)
-			return routing.HRES_RETURN
-		})
-		routing.Shared.Handler("^/dav/.*$", webdav)
-		go func() {
-			log.Printf("start webdav server by listen(%v),davpth(%v)", webdavAddr, webdavPath)
-			err := routing.ListenAndServe(webdavAddr)
-			fmt.Println(err)
-			os.Exit(1)
-		}()
-	}
 	//
 	tokens := map[string]int{}
 	for _, token := range tokenList {
@@ -387,7 +354,7 @@ func sctrlClient() {
 	var name = "Sctrl"
 	if len(serverAddr) < 1 {
 		pwd, _ := os.Getwd()
-		conf, err = ReadWorkConf(".sctrl.json")
+		conf, err = ReadWorkConf(wsconf)
 		if err != nil {
 			fmt.Printf("read %v/.sctrl.json fail, %v", pwd, err)
 			os.Exit(1)
@@ -436,6 +403,7 @@ func sctrlClient() {
 	fmt.Printf("start %v by:\n  server:%v\n  bash:%v\n  ps1:%v\n  instance:%v\n",
 		name, serverAddr, bash, ps1, instancePath)
 	//
+	login := make(chan int)
 	client = fsck.NewSlaver("client")
 	client.OnLogin = func(a *rc.AutoLoginH, err error) {
 		if err != nil {
@@ -444,6 +412,7 @@ func sctrlClient() {
 			readkey.Close()
 			os.Exit(1)
 		}
+		login <- 1
 	}
 	webcmd, _ := filepath.Abs(os.Args[0])
 	terminal := NewTerminal(client, ps1, bash, webcmd)
@@ -461,7 +430,8 @@ func sctrlClient() {
 		os.Exit(1)
 	}
 	fmt.Printf("%v is connected\n", serverAddr)
-	terminal.Proc(conf.Hosts...)
+	<-login
+	terminal.Proc(conf)
 }
 
 func sctrlExec(cmds string) {
@@ -492,6 +462,46 @@ func sctrlLogCli(name ...string) {
 		}
 		time.Sleep(delay)
 	}
+}
+
+func sctrlWebdav() {
+	if len(webdavPath) < 1 {
+		return
+	}
+	webdav := &webdav.Handler{
+		Prefix:     "/dav",
+		FileSystem: webdav.Dir(webdavPath),
+		LockSystem: webdav.NewMemLS(),
+		Logger: func(req *http.Request, err error) {
+			if err == nil {
+				gwflog.D("Dav %v to %v success", req.Method, req.URL.Path)
+			} else {
+				gwflog.E("Dav %v to %v error %v", req.Method, req.URL.Path, err)
+			}
+		},
+	}
+	routing.Shared.HFilterFunc("^/.*$", func(hs *routing.HTTPSession) routing.HResult {
+		if len(webdavUser) < 1 {
+			return routing.HRES_CONTINUE
+		}
+		usr, pwd, ok := hs.R.BasicAuth()
+		if !ok {
+			hs.W.WriteHeader(403)
+			hs.W.Write([]byte("not access\n"))
+			return routing.HRES_RETURN
+		}
+		if fmt.Sprintf("%v:%v", usr, pwd) == webdavUser {
+			return routing.HRES_CONTINUE
+		}
+		hs.W.Write([]byte("not access\n"))
+		hs.W.WriteHeader(403)
+		return routing.HRES_RETURN
+	})
+	routing.Shared.Handler("^/dav/.*$", webdav)
+	log.Printf("start webdav server by listen(%v),davpth(%v)", webdavAddr, webdavPath)
+	err := routing.ListenAndServe(webdavAddr)
+	fmt.Println(err)
+	os.Exit(1)
 }
 
 func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd string, err error) {

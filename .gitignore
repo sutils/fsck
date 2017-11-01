@@ -16,3 +16,7 @@
 fsck/fsck
 
 sctrl/sctrl
+
+coverage.html
+
+coverage.json

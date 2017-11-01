@@ -95,6 +95,7 @@ type Terminal struct {
 	C            *fsck.Slaver
 	Mux          *http.ServeMux
 	WebSrv       *httptest.Server
+	Forward      *fsck.Forward
 	WebCmd       string //the web cmd path
 	CmdPrefix    string
 	InstancePath string
@@ -128,6 +129,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 		taskLck:      sync.RWMutex{},
 		InstancePath: "/tmp/.sctrl_instance.json",
 		Name:         "Sctrl",
+		Forward:      fsck.NewForward(c),
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
@@ -143,12 +145,13 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	fmt.Fprintf(prefix, "alias shelp='%v -run shelp'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sexec='%v -run sexec'\n", webcmd)
 	fmt.Fprintf(prefix, "alias seval='%v -run seval'\n", webcmd)
+	fmt.Fprintf(prefix, "alias saddmap='%v -run saddmap'\n", webcmd)
+	fmt.Fprintf(prefix, "alias srmmap='%v -run srmmap'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
 	return term
 }
-
 func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	line = strings.TrimSpace(line)
 	cmds := SpaceRegex.Split(line, 2)
@@ -165,12 +168,12 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		return
 	case "sadd":
 		if len(cmds) < 2 {
-			err = fmt.Errorf("Usage: sadd <name> <uri> [connect]")
+			err = saddUsage
 			return
 		}
 		args := SpaceRegex.Split(cmds[1], 3)
 		if len(args) < 2 {
-			err = fmt.Errorf("Usage: sadd <name> <uri> [connect]")
+			err = saddUsage
 			return
 		}
 		err = t.AddSession(args[0], args[1], len(args) > 2 && args[2] == "connect")
@@ -183,7 +186,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		return
 	case "srm":
 		if len(cmds) < 2 {
-			err = fmt.Errorf("Usage: srm <name>")
+			err = srmUsage
 			return
 		}
 		buf := bytes.NewBuffer(nil)
@@ -210,7 +213,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		return
 	case "spick":
 		if len(cmds) < 2 {
-			err = fmt.Errorf("Usage: spick <name1> <name2> <...>")
+			err = spickUsage
 			return
 		}
 		args := SpaceRegex.Split(cmds[1], -1)
@@ -242,12 +245,12 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		if len(bys) > 0 {
 			data = bys
 		} else {
-			data = []byte("ok")
+			data = []byte("ok\n")
 		}
 		return
 	case "sexec":
 		if len(cmds) < 2 {
-			err = fmt.Errorf("Usage: sexec <cmd> <arg1> <arg2> <...>")
+			err = sexeclUsage
 			return
 		}
 		task := NewTask()
@@ -256,7 +259,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		return
 	case "seval":
 		if len(cmds) < 2 {
-			err = fmt.Errorf("Usage: seval <script file> <arg1> <arg2> <...>")
+			err = sevalUsage
 			return
 		}
 		args := strings.TrimSpace(cmds[1])
@@ -300,28 +303,35 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		data = task
 		go t.remoteExecf(task, string(shell.Bytes()))
 		return
+	case "saddmap":
+		if len(cmds) < 2 {
+			err = saddmapUsage
+			return
+		}
+		args := SpaceRegex.Split(cmds[1], 3)
+		if len(args) < 3 {
+			err = saddmapUsage
+			return
+		}
+		_, err = t.Forward.Start(&fsck.Mapping{
+			Name:   args[0],
+			Local:  args[1],
+			Remote: args[2],
+		})
+		data = "ok\n"
+		return
+	case "srmmap":
+		if len(cmds) < 2 {
+			err = srmmapUsage
+			return
+		}
+		err = t.Forward.Stop(cmds[1], len(cmds) > 2 && cmds[2] == "connected")
+		data = "ok\n"
+		return
 	case "shelp":
 		fallthrough
 	case "":
-		buf := bytes.NewBuffer(nil)
-		fmt.Fprintf(buf,
-			` sadd <name> <uri> [connect]
-	add session
- srm <name>
-	remove session
- sall
-	show all session
- spick <name1> <name2> <...>
-	pick session, use 'spick all' to  pick all
- shelp
-	show this
- sexec <cmd> <arg1> <arg2> <...>
-	execute command on session
- seval <script file> <arg1> <arg2> <...>
-    execute local script file to session.
-
-`)
-		data = buf.Bytes()
+		data = shelpUsage
 		return
 	default:
 		err = fmt.Errorf("-error: command %v not found", line)
@@ -550,6 +560,12 @@ func (t *Terminal) AddSession(name, uri string, connect bool) (err error) {
 	return
 }
 
+func (t *Terminal) AddForward(m *fsck.Mapping) (err error) {
+	fmt.Printf("add forward by name(%v),local(%v),remote(%v)\n", m.Name, m.Local, m.Remote)
+	_, err = t.Forward.Start(m)
+	return
+}
+
 func (t *Terminal) SaveConf() {
 	if len(t.InstancePath) < 1 {
 		return
@@ -595,7 +611,7 @@ func (t *Terminal) SaveConf() {
 	log.Printf("save instance info to %v success", t.InstancePath)
 }
 
-func (t *Terminal) Proc(hosts ...*Host) (err error) {
+func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	//initial
 	t.WebSrv.Start()
 	log.Printf("listen web on %v", t.WebSrv.URL)
@@ -612,7 +628,7 @@ func (t *Terminal) Proc(hosts ...*Host) (err error) {
 	//
 	go t.handleCallback()
 	//
-	for _, host := range hosts {
+	for _, host := range conf.Hosts {
 		if len(host.Name) < 1 || len(host.URI) < 1 {
 			fmt.Printf("host conf %v is not correct,name/uri must be setted\n", MarshalAll(host))
 			continue
@@ -620,6 +636,16 @@ func (t *Terminal) Proc(hosts ...*Host) (err error) {
 		err := t.AddSession(host.Name, host.URI, host.Startup > 0)
 		if err != nil {
 			fmt.Printf("add session fail with %v\n", err)
+		}
+	}
+	for _, forward := range conf.Forward {
+		if len(forward.Name) < 1 || len(forward.Local) < 1 || len(forward.Remote) < 1 {
+			fmt.Printf("forward conf %v is not correct,name/local/remote must be setted\n", MarshalAll(forward))
+			continue
+		}
+		err := t.AddForward(forward)
+		if err != nil {
+			fmt.Printf("add forward fail with %v\n", err)
 		}
 	}
 	//

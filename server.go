@@ -55,6 +55,16 @@ func (s *Server) Run(addr string, ts map[string]int) error {
 	return err
 }
 
+func (s *Server) Close() error {
+	if s.Master != nil {
+		s.Master.Close()
+	}
+	if s.Local != nil {
+		s.Local.Close()
+	}
+	return nil
+}
+
 type Master struct {
 	L       *rc.RC_Listener_m
 	slck    sync.RWMutex
@@ -82,6 +92,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddToken(ts)
 	m.L.RCBH.AddF(ChannelCmdS, m.OnChannelCmd)
 	m.L.AddHFunc("dial", m.DailH)
+	m.L.AddHFunc("close", m.CloseH)
 	err = m.L.Run()
 	return
 }
@@ -167,6 +178,42 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	return
 }
 
+func (m *Master) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	var sid uint16
+	err = rc.ValidF(`
+		sid,R|S,L:0;
+		`, &sid)
+	if err != nil {
+		return
+	}
+	session := rc.Kvs().StrVal("session")
+	m.slck.RLock()
+	name := m.si2n[fmt.Sprintf("%v-%v", session, sid)]
+	cid := m.slavers[name]
+	m.slck.RUnlock()
+	defer func() {
+		m.slck.Lock()
+		delete(m.ni2s, fmt.Sprintf("%v-%v", name, sid))
+		delete(m.si2n, fmt.Sprintf("%v-%v", session, sid))
+		m.slck.Unlock()
+	}()
+	cmdc := m.L.CmdC(cid)
+	if cmdc == nil {
+		err = fmt.Errorf("slaver not found")
+		log.D("Master close session(%v) on name(%v) fail with %v", sid, name, err)
+		return
+	}
+	val, err = cmdc.Exec_m("close", util.Map{
+		"sid": sid,
+	})
+	if err == nil {
+		log.D("Master close session(%v) on name(%v) success", sid, name)
+	} else {
+		log.D("Master close session(%v) on name(%v) fail with %v", sid, name, err)
+	}
+	return
+}
+
 func (m *Master) OnChannelCmd(c netw.Cmd) int {
 	data := c.Data()
 	if len(data) < 3 {
@@ -245,6 +292,18 @@ func (m *Master) OnConn(c netw.Con) bool {
 
 //OnClose see ConHandler for detail
 func (m *Master) OnClose(c netw.Con) {
+	m.slck.Lock()
+	name := c.Kvs().StrVal("name")
+	if len(name) > 0 {
+		delete(m.slavers, name)
+		log.D("Master the %v connection(%v) is closed", TypeSlaver, name)
+	}
+	session := c.Kvs().StrVal("session")
+	if len(session) > 0 {
+		delete(m.clients, session)
+		log.D("Master the %v connection(%v) is closed", TypeClient, session)
+	}
+	m.slck.Unlock()
 }
 
 //OnCmd see ConHandler for detail
@@ -254,6 +313,13 @@ func (m *Master) OnCmd(c netw.Cmd) int {
 
 func (m *Master) Wait() {
 	m.L.Wait()
+}
+
+func (m *Master) Close() (err error) {
+	if m.L != nil {
+		m.L.Close()
+	}
+	return
 }
 
 type Slaver struct {
@@ -301,6 +367,10 @@ func (s *Slaver) DialSession(name, uri string) (session *Session, err error) {
 	return s.Channel.DialSession(name, uri)
 }
 
+func (s *Slaver) CloseSession(sid uint16) (err error) {
+	return s.Channel.Close(sid)
+}
+
 //OnConn see ConHandler for detail
 func (s *Slaver) OnConn(con netw.Con) bool {
 	//fmt.Println("master is connected")
@@ -318,7 +388,8 @@ func (s *Slaver) OnCmd(con netw.Cmd) int {
 }
 
 func (s *Slaver) Close() error {
-	return s.R.Close()
+	s.R.Stop()
+	return nil
 }
 
 type Channel struct {
@@ -338,6 +409,7 @@ func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S
 		SP: sp,
 	}
 	channel.RS.AddHFunc("dial", channel.DialH)
+	channel.RS.AddHFunc("close", channel.CloseH)
 	channel.BH.AddF(ChannelCmdC, channel.OnMasterCmd)
 	return channel
 }
@@ -364,6 +436,44 @@ func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		"sid": session.SID,
 	}
 	log.D("Channel create session by uri(%v) is success with sid(%v)", uri, session.SID)
+	return
+}
+
+func (c *Channel) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	var sid uint16
+	err = rc.ValidF(`
+		sid,R|S,L:0;
+		`, &sid)
+	if err != nil {
+		return
+	}
+	session := c.SP.Remove(sid)
+	if session == nil {
+		err = fmt.Errorf("session(%v) is not found", sid)
+	}
+	val = util.Map{
+		"code": 0,
+		"sid":  session.SID,
+	}
+	log.D("Channel remove session(%v) success", session.SID)
+	return
+}
+
+func (c *Channel) Close(sid uint16) (err error) {
+	session := c.SP.Find(sid)
+	if session == nil {
+		err = fmt.Errorf("session(%v) is not exists", sid)
+		return
+	}
+	defer session.Close()
+	_, err = c.RM.Exec_m("close", util.Map{
+		"sid": sid,
+	})
+	if err == nil {
+		log.D("Channel close session(%v) success", sid)
+	} else {
+		log.D("Channel close session(%v) fail with %v", sid, err)
+	}
 	return
 }
 

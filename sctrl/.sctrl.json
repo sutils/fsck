@@ -9,7 +9,14 @@
         {
             "name": "loc",
             "uri": "test://root:sco@loc.m?pty=vt100",
-            "startup": 1
+            "startup": 0
+        }
+    ],
+    "forward": [
+        {
+            "name": "loc",
+            "local": ":2943",
+            "remote": "test://loc.m:80"
         }
     ]
 }

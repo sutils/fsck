@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
+
+	"github.com/sutils/fsck"
 )
 
 type Host struct {
@@ -12,13 +14,14 @@ type Host struct {
 }
 
 type WorkConf struct {
-	Name     string  `json:"name"`
-	SrvAddr  string  `json:"server"`
-	Login    string  `json:"login"`
-	Bash     string  `json:"bash"`
-	PS1      string  `json:"ps1"`
-	Instance string  `json:"instance"`
-	Hosts    []*Host `json:"hosts"`
+	Name     string          `json:"name"`
+	SrvAddr  string          `json:"server"`
+	Login    string          `json:"login"`
+	Bash     string          `json:"bash"`
+	PS1      string          `json:"ps1"`
+	Instance string          `json:"instance"`
+	Hosts    []*Host         `json:"hosts"`
+	Forward  []*fsck.Mapping `json:"forward"`
 }
 
 func ReadWorkConf(path string) (conf *WorkConf, err error) {
