@@ -243,6 +243,74 @@ func main() {
 		mode = os.Args[1]
 	}
 	switch {
+	// case mode == "-sim":
+	// 	host, err := ParseSshHost("xx", "test://root:Asd_321@222.16.80.120:10022?pty=xterm", nil)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	session := NewSshSession(nil, host)
+	// 	conn, err := net.Dial("tcp", "222.16.80.120:10022")
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	defer readkey.Close()
+	// 	session.Add(os.Stdout)
+	// 	session.StartSession(conn)
+	// 	for {
+	// 		key, err := readkey.ReadKey()
+	// 		if err != nil || bytes.Equal(key, CharTerm) {
+	// 			break
+	// 		}
+	// 		// fmt.Printf("-->%v\n", key)
+	// 		session.Write(key)
+	// 	}
+	// case mode == "-sim2":
+	// 	// Create client config
+	// 	config := &ssh.ClientConfig{
+	// 		User: "root",
+	// 		Auth: []ssh.AuthMethod{
+	// 			ssh.Password("Asd_321"),
+	// 		},
+	// 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	// 	}
+	// 	// Connect to ssh server
+	// 	conn, err := ssh.Dial("tcp", "222.16.80.120:10022", config)
+	// 	if err != nil {
+	// 		log.Fatal("unable to connect: ", err)
+	// 	}
+	// 	defer conn.Close()
+	// 	// Create a session
+	// 	session, err := conn.NewSession()
+	// 	if err != nil {
+	// 		log.Fatal("unable to create session: ", err)
+	// 	}
+	// 	session.Stdout = os.Stdout
+	// 	session.Stderr = os.Stderr
+	// 	stdin, _ := session.StdinPipe()
+	// 	defer session.Close()
+	// 	// Set up terminal modes
+	// 	modes := ssh.TerminalModes{
+	// 		ssh.ECHO:          1,     // disable echoing
+	// 		ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+	// 		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+	// 	}
+	// 	// Request pseudo terminal
+	// 	if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
+	// 		log.Fatal("request for pseudo terminal failed: ", err)
+	// 	}
+	// 	// Start remote shell
+	// 	if err := session.Shell(); err != nil {
+	// 		log.Fatal("failed to start shell: ", err)
+	// 	}
+	// 	for {
+	// 		key, err := readkey.ReadKey()
+	// 		if err != nil || bytes.Equal(key, CharTerm) {
+	// 			break
+	// 		}
+	// 		// fmt.Printf("-->%v\n", key)
+	// 		stdin.Write(key)
+	// 	}
+	// 	session.Wait()
 	case name == "sctrl-server" || mode == "-s":
 		regCommonFlags()
 		regServerFlags(name == "sctrl-server")

@@ -213,8 +213,10 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	s.stdin, _ = s.session.StdinPipe()
 	// Request pseudo terminal
 	modes := ssh.TerminalModes{
-		ssh.ECHO:  0, // Disable echoing
-		ssh.IGNCR: 1, // Ignore CR on input.
+	// ssh.ECHO:          0,     // Disable echoing
+	// ssh.IGNCR:         1,     // Ignore CR on input.
+	// ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+	// ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 	}
 	pty := s.Pty
 	if len(pty) < 1 {
