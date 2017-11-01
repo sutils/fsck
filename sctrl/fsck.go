@@ -410,6 +410,7 @@ func sctrlServer() {
 		tokens[token] = 1
 	}
 	server := fsck.NewServer()
+	server.HbDelay = int64(hbdelay)
 	err := server.Run(listen, tokens)
 	if err != nil {
 		fmt.Println(err)

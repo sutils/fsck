@@ -67,6 +67,7 @@ func (s *Server) Close() error {
 
 type Master struct {
 	L       *rc.RC_Listener_m
+	HbDelay int64
 	slck    sync.RWMutex
 	slavers map[string]string //slaver name map to connect id
 	clients map[string]string //client session map to connect id
@@ -88,6 +89,9 @@ func NewMaster() *Master {
 func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L = rc.NewRC_Listener_m_j(pool.BP, rcaddr, m)
 	m.L.Name = "Master"
+	if m.HbDelay > 0 {
+		m.L.PingDelay = m.HbDelay
+	}
 	m.L.LCH = m
 	m.L.AddToken(ts)
 	m.L.RCBH.AddF(ChannelCmdS, m.OnChannelCmd)
