@@ -119,7 +119,11 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	if oldCmd != nil {
 		oldCmd.Close()
 	}
-	log.D("Master accept %v connect by session(%v),name(%v) from %v", ctype, session, name, rc.RemoteAddr())
+	if ctype == TypeSlaver {
+		log.D("Master accept slaver connect by name(%v) from %v", name, rc.RemoteAddr())
+	} else {
+		log.D("Master accept client connect by session(%v) from %v", session, rc.RemoteAddr())
+	}
 	return
 }
 
