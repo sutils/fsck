@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,9 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/webdav"
+
 	"github.com/sutils/readkey"
 
 	gwflog "github.com/Centny/gwf/log"
+	"github.com/Centny/gwf/routing"
 
 	"github.com/Centny/gwf/netw/rc"
 
@@ -45,6 +49,7 @@ func (a *ArrayFlags) Set(value string) error {
 //common argument falgs
 var loglevel int
 var help bool
+var alias bool
 
 //not alias argument
 var runClient bool
@@ -54,15 +59,22 @@ var runExec bool
 
 func regCommonFlags() {
 	flag.BoolVar(&help, "h", false, "show help")
+	flag.BoolVar(&alias, "alias", false, "alias command")
 	flag.IntVar(&loglevel, "loglevel", 0, "the log level")
 }
 
 //sctrl-server argument flags
 var listen string
 var tokenList ArrayFlags
+var webdavAddr string
+var webdavPath string
+var webdavUser string
 
 func regServerFlags(alias bool) {
 	flag.StringVar(&listen, "listen", ":9234", "the sctrl server listen address")
+	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
+	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
+	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
 	flag.Var(&tokenList, "token", "the auth token")
 	if !alias {
 		flag.BoolVar(&runServer, "s", false, "run as server")
@@ -117,13 +129,27 @@ func printAllUsage(code int) {
 	regServerFlags(false)
 	regSlaverFlags(false)
 	regExecFlags(false)
-	flag.Usage()
+	_, name := filepath.Split(os.Args[0])
+	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	fmt.Fprintf(os.Stderr, "Usage:  %v <-s|-c|-sc|-lc|-run] [option]\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -s -listen :9423 -token abc\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -c -server sctrl.srv:9423 -login abc\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -sc -master sctrl.srv:9423 -auth abc -name x1\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -lc debug\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -lc host1\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -run sadd host root:xxx@host.local\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -run spick host host1\n", name)
+	fmt.Fprintf(os.Stderr, "All options:\n")
+	flag.PrintDefaults()
 	os.Exit(code)
 }
 
 func printServerUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
-	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		name = "sctrl-server"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl server version %v\n", Version)
 	if alias {
 		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -listen :9423 -token abc\n", name)
@@ -138,7 +164,10 @@ func printServerUsage(code int, alias bool) {
 
 func printClientUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
-	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		name = "sctrl-client"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl client version %v\n", Version)
 	if alias {
 		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -server sctrl.srv:9423 -login abc\n", name)
@@ -153,13 +182,16 @@ func printClientUsage(code int, alias bool) {
 
 func printSlaverUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
-	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		name = "sctrl-slaver"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl slaver version %v\n", Version)
 	if alias {
 		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -master sctrl.srv:9423 -auth abc -name x1\n", name)
 	} else {
-		fmt.Fprintf(os.Stderr, "Usage:  %v -c [option]\n", name)
-		fmt.Fprintf(os.Stderr, "        %v -c -master sctrl.srv:9423 -auth abc -name x1\n", name)
+		fmt.Fprintf(os.Stderr, "Usage:  %v -sc [option]\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -sc -master sctrl.srv:9423 -auth abc -name x1\n", name)
 	}
 	fmt.Fprintf(os.Stderr, "Slaver options:\n")
 	flag.PrintDefaults()
@@ -168,7 +200,10 @@ func printSlaverUsage(code int, alias bool) {
 
 func printLogCliUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
-	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		name = "sctrl-log"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl log version %v\n", Version)
 	if alias {
 		fmt.Fprintf(os.Stderr, "Usage:  %v [log name] [log name2] ...\n", name)
 		fmt.Fprintf(os.Stderr, "        %v debug\n", name)
@@ -183,7 +218,10 @@ func printLogCliUsage(code int, alias bool) {
 
 func printExecUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
-	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
+	if alias {
+		name = "sctrl-exec"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl exec version %v\n", Version)
 	if alias {
 		fmt.Fprintf(os.Stderr, "Usage:  %v [command] [arg1] [arg2] ...\n", name)
 		fmt.Fprintf(os.Stderr, "        %v sadd host root:xxx@host.local\n", name)
@@ -208,10 +246,10 @@ func main() {
 		regServerFlags(name == "sctrl-server")
 		flag.Parse()
 		if help {
-			printServerUsage(0, name == "sctrl-server")
+			printServerUsage(0, alias || name == "sctrl-server")
 		}
 		if len(listen) < 1 || len(tokenList) < 1 {
-			printServerUsage(1, name == "sctrl-server")
+			printServerUsage(1, alias || name == "sctrl-server")
 		}
 		sctrlServer()
 	case name == "sctrl-client" || mode == "-c":
@@ -219,7 +257,7 @@ func main() {
 		regClientFlags(name == "sctrl-client")
 		flag.Parse()
 		if help {
-			printClientUsage(0, name == "sctrl-client")
+			printClientUsage(0, alias || name == "sctrl-client")
 		}
 		sctrlClient()
 	case name == "sctrl-slaver" || mode == "-sc":
@@ -227,7 +265,7 @@ func main() {
 		regSlaverFlags(name == "sctrl-slaver")
 		flag.Parse()
 		if help {
-			printSlaverUsage(0, name == "sctrl-slaver")
+			printSlaverUsage(0, alias || name == "sctrl-slaver")
 		}
 		if len(masterAddr) < 1 || len(slaverToken) < 1 || len(slaverName) < 1 {
 			flag.Usage()
@@ -237,34 +275,38 @@ func main() {
 	case name == "sctrl-log" || mode == "-lc":
 		for _, arg := range os.Args {
 			if arg == "-h" {
-				printLogCliUsage(0, name == "sctrl-server")
+				printLogCliUsage(0, alias || name == "sctrl-server")
+			} else if arg == "-alias" {
+				alias = true
 			}
 		}
 		if mode == "-lc" {
 			if len(os.Args) < 3 {
-				printLogCliUsage(1, name == "sctrl-server")
+				printLogCliUsage(1, alias || name == "sctrl-server")
 			}
 			sctrlLogCli(os.Args[2:]...)
 		} else {
 			if len(os.Args) < 2 {
-				printLogCliUsage(1, name == "sctrl-server")
+				printLogCliUsage(1, alias || name == "sctrl-server")
 			}
 			sctrlLogCli(os.Args[1:]...)
 		}
 	case name == "sctrl-exec" || mode == "-run":
 		for _, arg := range os.Args {
 			if arg == "-h" {
-				printExecUsage(0, name == "sctrl-exec")
+				printExecUsage(0, alias || name == "sctrl-exec")
+			} else if arg == "-alias" {
+				alias = true
 			}
 		}
 		if mode == "-run" {
 			if len(os.Args) < 3 {
-				printExecUsage(1, name == "sctrl-exec")
+				printExecUsage(1, alias || name == "sctrl-exec")
 			}
 			sctrlExec(JoinArgs("", os.Args[2:]...))
 		} else {
 			if len(os.Args) < 2 {
-				printExecUsage(1, name == "sctrl-exec")
+				printExecUsage(1, alias || name == "sctrl-exec")
 			}
 			sctrlExec(JoinArgs("", os.Args[1:]...))
 		}
@@ -278,6 +320,46 @@ func main() {
 func sctrlServer() {
 	log.Printf("start sctrl server by listen(%v),loglevel(%v),token(%v)", listen, loglevel, tokenList)
 	// fsck.ShowLog = loglevel
+	//
+	if len(webdavPath) > 0 {
+		webdav := &webdav.Handler{
+			Prefix:     "/dav",
+			FileSystem: webdav.Dir(webdavPath),
+			LockSystem: webdav.NewMemLS(),
+			Logger: func(req *http.Request, err error) {
+				if err == nil {
+					gwflog.D("Dav %v to %v success", req.Method, req.URL.Path)
+				} else {
+					gwflog.E("Dav %v to %v error %v", req.Method, req.URL.Path, err)
+				}
+			},
+		}
+		routing.Shared.HFilterFunc("^/.*$", func(hs *routing.HTTPSession) routing.HResult {
+			if len(webdavUser) < 1 {
+				return routing.HRES_CONTINUE
+			}
+			usr, pwd, ok := hs.R.BasicAuth()
+			if !ok {
+				hs.W.WriteHeader(403)
+				hs.W.Write([]byte("not access\n"))
+				return routing.HRES_RETURN
+			}
+			if fmt.Sprintf("%v:%v", usr, pwd) == webdavUser {
+				return routing.HRES_CONTINUE
+			}
+			hs.W.Write([]byte("not access\n"))
+			hs.W.WriteHeader(403)
+			return routing.HRES_RETURN
+		})
+		routing.Shared.Handler("^/dav/.*$", webdav)
+		go func() {
+			log.Printf("start webdav server by listen(%v),davpth(%v)", webdavAddr, webdavPath)
+			err := routing.ListenAndServe(webdavAddr)
+			fmt.Println(err)
+			os.Exit(1)
+		}()
+	}
+	//
 	tokens := map[string]int{}
 	for _, token := range tokenList {
 		tokens[token] = 1
