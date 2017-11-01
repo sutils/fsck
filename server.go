@@ -160,6 +160,8 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		err = fmt.Errorf("the channel is not found by name(%v)", name)
 		return
 	}
+	session := rc.Kvs().StrVal("session")
+	log.D("Master try dial to %v on channel(%v),session(%v)", uri, name, session)
 	res, err := cmdc.Exec_m("dial", util.Map{
 		"uri":  uri,
 		"name": name,
@@ -168,7 +170,6 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		return
 	}
 	sid := uint16(res.IntVal("sid"))
-	session := rc.Kvs().StrVal("session")
 
 	m.slck.Lock()
 	m.ni2s[fmt.Sprintf("%v-%v", name, sid)] = session
