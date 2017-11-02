@@ -525,7 +525,7 @@ func sctrlLogCli(name ...string) {
 		if err != nil && reflect.TypeOf(err).String() == "*url.Error" && len(last) > 0 {
 			fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
 		} else {
-			fmt.Printf("->reply error:%v", err)
+			fmt.Printf("->reply error:%v\n", err)
 		}
 		time.Sleep(delay)
 	}
@@ -623,7 +623,7 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 		if len(confList) < 1 {
 			//configure not found
 			if wait {
-				fmt.Printf("->instance list is empty on %v, will try after %v", confPath, delay)
+				fmt.Printf("->instance list is empty on %v, will try after %v\n", confPath, delay)
 				time.Sleep(delay)
 				continue
 			}
@@ -649,7 +649,7 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			}
 			//last not foud
 			if wait {
-				fmt.Printf("->last instance(%v) is offline, will try after %v", last, delay)
+				fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
 				time.Sleep(delay)
 				continue
 			}
