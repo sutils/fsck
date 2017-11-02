@@ -103,6 +103,7 @@ type Terminal struct {
 	InstancePath string
 	Name         string
 	Env          []string
+	stdout       *os.File
 	//
 	selected  []string
 	activited Shell
@@ -133,6 +134,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 		InstancePath: "/tmp/.sctrl_instance.json",
 		Name:         "Sctrl",
 		Forward:      fsck.NewForward(c),
+		stdout:       os.Stdout,
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
@@ -470,14 +472,14 @@ func (t *Terminal) Activate(shell Shell) {
 		return
 	}
 	if t.activited != nil {
-		t.activited.Remove(os.Stdout)
+		t.activited.Remove(t.stdout)
 	}
 	shell.Add(os.Stdout)
 	_, err := shell.Write([]byte("\n"))
 	if err != nil {
-		shell.Remove(os.Stdout)
+		shell.Remove(t.stdout)
 		if t.activited != nil {
-			t.activited.Add(os.Stdout)
+			t.activited.Add(t.stdout)
 			fmt.Printf("%v activate fail with %v", shell, err)
 			t.activited.Write([]byte("\n"))
 		}
@@ -486,6 +488,9 @@ func (t *Terminal) Activate(shell Shell) {
 	t.last = shell.String()
 	t.activited = shell
 	fmt.Printf("%v is activated now", t.activited)
+	if t.activited == t.Cmd {
+		t.NotifyTitle()
+	}
 }
 
 func (t *Terminal) Switch(name string) (switched bool) {
@@ -612,6 +617,7 @@ func (t *Terminal) SaveConf() {
 		"web_url": t.WebSrv.URL,
 		"pwd":     pwd,
 		"name":    name,
+		"last":    util.Now(),
 	}
 	for idx, cf := range conf {
 		cpwd, _ := cf["pwd"].(string)
@@ -634,7 +640,7 @@ func (t *Terminal) SaveConf() {
 		log.Printf("save instance info to %v fail with %v", t.InstancePath, err)
 		return
 	}
-	log.Printf("save instance info to %v success", t.InstancePath)
+	//log.Printf("save instance info to %v success", t.InstancePath)
 }
 
 func (t *Terminal) Proc(conf *WorkConf) (err error) {
@@ -649,9 +655,6 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	if err != nil {
 		return
 	}
-	t.SaveConf()
-	//
-	t.NotifyTitle()
 	//
 	go t.handleCallback()
 	//
@@ -676,12 +679,20 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 		}
 	}
 	//
-	//
 	t.Switch(t.Cmd.Name)
 	//
-	var key []byte
 	t.running = true
-	keyin := make(chan []byte)
+	go func() {
+		for t.running {
+			t.SaveConf()
+			if t.activited == t.Cmd {
+				t.NotifyTitle()
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
+	//
+	keyin := make(chan []byte, 10240)
 	keydone := make(chan int)
 	go func() {
 		for t.running {
@@ -717,7 +728,7 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 		}
 	}()
 	for t.running {
-		key, err = readkey.ReadKey()
+		key, err := readkey.ReadKey()
 		if err != nil || bytes.Equal(key, CharTerm) {
 			t.CloseExit()
 			break

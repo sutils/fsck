@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Centny/gwf/netw/impl"
+	"github.com/kr/pty"
 
 	"github.com/Centny/gwf/netw"
 
@@ -251,6 +254,21 @@ func main() {
 		mode = os.Args[1]
 	}
 	switch {
+	case mode == "-sim3":
+		c := exec.Command("bash")
+		f, err := pty.Start(c)
+		if err != nil {
+			panic(err)
+		}
+		go io.Copy(os.Stdout, f)
+		for {
+			key, err := readkey.ReadKey()
+			if err != nil || bytes.Equal(key, CharTerm) {
+				break
+			}
+			// fmt.Printf("-->%v\n", key)
+			f.Write(key)
+		}
 	case mode == "-sim":
 		host, err := ParseSshHost("xx", "test://root:Asd_321@222.16.80.120:10022?pty=xterm", nil)
 		if err != nil {
@@ -277,12 +295,12 @@ func main() {
 		config := &ssh.ClientConfig{
 			User: "root",
 			Auth: []ssh.AuthMethod{
-				ssh.Password("Asd_321"),
+				ssh.Password("sco"),
 			},
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		}
 		// Connect to ssh server
-		conn, err := ssh.Dial("tcp", "222.16.80.120:10022", config)
+		conn, err := ssh.Dial("tcp", "loc.m:22", config)
 		if err != nil {
 			log.Fatal("unable to connect: ", err)
 		}
@@ -294,13 +312,14 @@ func main() {
 		}
 		session.Stdout = os.Stdout
 		session.Stderr = os.Stderr
-		stdin, _ := session.StdinPipe()
+		session.Stdin = os.Stdin
+		// stdin, _ := session.StdinPipe()
 		defer session.Close()
 		// Set up terminal modes
 		modes := ssh.TerminalModes{
-			ssh.ECHO:          0,     // disable echoing
-			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+		// ssh.ECHO:          0,     // disable echoing
+		// ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+		// ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 		}
 		// Request pseudo terminal
 		if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
@@ -310,14 +329,14 @@ func main() {
 		if err := session.Shell(); err != nil {
 			log.Fatal("failed to start shell: ", err)
 		}
-		for {
-			key, err := readkey.ReadKey()
-			if err != nil || bytes.Equal(key, CharTerm) {
-				break
-			}
-			fmt.Printf("-->%v\n", key)
-			stdin.Write(key)
-		}
+		// for {
+		// 	key, err := readkey.ReadKey()
+		// 	if err != nil || bytes.Equal(key, CharTerm) {
+		// 		break
+		// 	}
+		// 	// fmt.Printf("-->%v\n", key)
+		// 	stdin.Write(key)
+		// }
 		session.Wait()
 	case name == "sctrl-server" || mode == "-s":
 		regCommonFlags()
@@ -608,7 +627,6 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 		filepath.Join("/tmp", ".sctrl_instance.json"),
 	}
 	for {
-		confList := []map[string]interface{}{}
 		for _, confPath = range allConf {
 			data, err = ioutil.ReadFile(confPath)
 			if err == nil {
@@ -624,10 +642,25 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			err = fmt.Errorf("find the fsck web url fail")
 			return
 		}
-		err = json.Unmarshal(data, &confList)
+		rawConfList := []util.Map{}
+		err = json.Unmarshal(data, &rawConfList)
 		if err != nil {
 			err = fmt.Errorf("read fsck config file(%v) fail with %v", confPath, err)
 			return
+		}
+		confList := []util.Map{}
+		now := util.Now()
+		maxname := 0
+		for _, conf := range rawConfList {
+			last := conf.IntValV("last", 0)
+			if last < 1 || now-last > 5000 {
+				continue
+			}
+			nlen := len(conf.StrVal("name"))
+			if nlen > maxname {
+				maxname = nlen
+			}
+			confList = append(confList, conf)
 		}
 		if len(confList) < 1 {
 			//configure not found
@@ -638,6 +671,11 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			}
 			err = fmt.Errorf("not running instance")
 			return
+		}
+		if len(confList) == 1 {
+			//only one
+			oneconf = confList[0]
+			break
 		}
 		if len(last) > 0 {
 			//the pwd is specified
@@ -660,15 +698,11 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			err = fmt.Errorf("not instance for pwd(%v)", last)
 			return
 		}
-		if len(confList) == 1 {
-			//only one
-			oneconf = confList[0]
-			break
-		}
 		//create instance info log.
 		buf := bytes.NewBuffer(nil)
+		format := fmt.Sprintf("%v%v%v", "%3d %", maxname, "s %v\n")
 		for idx, conf := range confList {
-			fmt.Fprintf(buf, "%v\t%v\t%v\n", idx, conf["name"], conf["pwd"])
+			fmt.Fprintf(buf, format, idx, conf["name"], conf["pwd"])
 		}
 		//
 		var rbuf = make([]byte, 1024)
@@ -677,7 +711,7 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			buf.WriteTo(os.Stdout)
 			fmt.Fprintf(os.Stdout, "Please select one(type r to reload)[0]:")
 			readed, _ := os.Stdin.Read(rbuf)
-			key = string(rbuf[:readed])
+			key = strings.TrimSpace(string(rbuf[:readed]))
 			if key == "r" {
 				//reload instance info from file.
 				break

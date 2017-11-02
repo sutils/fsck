@@ -29,12 +29,14 @@ type Server struct {
 }
 
 func NewServer() *Server {
-	var srv = &Server{}
+	var srv = &Server{
+		Master: NewMaster(),
+		Local:  NewSlaver("local"),
+	}
 	return srv
 }
 
 func (s *Server) Run(addr string, ts map[string]int) error {
-	s.Master = NewMaster()
 	if ts == nil {
 		ts = map[string]int{}
 	}
@@ -42,7 +44,6 @@ func (s *Server) Run(addr string, ts map[string]int) error {
 	ts[token] = 1
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		s.Local = NewSlaver("local")
 		err := s.Local.StartSlaver(addr, "master", token)
 		if err != nil {
 			panic(err)
