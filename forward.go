@@ -57,9 +57,12 @@ func (f *Forward) Start(m *Mapping) (listen net.Listener, err error) {
 	if err != nil {
 		return
 	}
-	listen, err = net.Listen("tcp", m.Local)
+	listen, err = NewLocalListener(m.Local)
 	if err != nil {
 		return
+	}
+	if len(m.Local) < 1 {
+		m.Local = strings.TrimPrefix(listen.Addr().String(), "127.0.0.1")
 	}
 	f.ms[m.Name] = m
 	f.ls[m.Local] = listen
@@ -136,6 +139,27 @@ func (f *Forward) Stop(name string, connected bool) (err error) {
 		<-stop
 	} else {
 		err = fmt.Errorf("Forward(%v) is not running", name)
+	}
+	return
+}
+
+func (f *Forward) List() (ms []*Mapping) {
+	f.lck.RLock()
+	defer f.lck.RUnlock()
+	for _, m := range f.ms {
+		ms = append(ms, m)
+	}
+	return
+}
+
+func NewLocalListener(addr string) (l net.Listener, err error) {
+	if len(addr) > 0 {
+		l, err = net.Listen("tcp", addr)
+		return
+	}
+	l, err = net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		l, err = net.Listen("tcp6", "[::1]:0")
 	}
 	return
 }

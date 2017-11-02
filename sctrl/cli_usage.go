@@ -73,14 +73,16 @@ var sevalUsage = NewUsage("Sctrl seval version %v\n", Version).
 
 var saddmapUsage = NewUsage("Sctrl saddmap version %v\n", Version).
 	Append("       saddmap will bind local address to remote host by uri\n").
-	Append("Usage: saddmap <name> <local> <remote>\n").
+	Append("Usage: saddmap <name> [<local>] <remote>\n").
 	Append("       saddmap rsync :2832 master://localhost:223\n").
 	Append("       saddmap rsync2 :2832 test1://192.168.1.100:223\n").
+	Append("       saddmap rsync3 test2://192.168.1.100:223\n").
 	Append("Options:\n").
 	Append("  name\n").
 	Append("       the forward alias\n").
 	Append("  local\n").
 	Append("       the local address to listen, it will be like :2322 or 127.0.0.1:2322\n").
+	Append("       if it is not setted, will auto select one\n").
 	Append("  remote\n").
 	Append("       the remote host uri to connect, it will be like channel://host:port\n").
 	Append("       eg: master://localhost:232,  test1://192.168.1.100:232\n")
@@ -89,6 +91,14 @@ var srmmapUsage = NewUsage("Sctrl srmmap version %v\n", Version).
 	Append("       srmmap will remove binded local address to remote host by name\n").
 	Append("Usage: srmmap <name>\n").
 	Append("       srmmap rsync\n").
+	Append("Options:\n").
+	Append("  name\n").
+	Append("       the forward alias\n")
+
+var slsmapUsage = NewUsage("Sctrl slsmap version %v\n", Version).
+	Append("       slsmap will show all forward info\n").
+	Append("Usage: slsmap [<name>]\n").
+	Append("       slsmap rsync\n").
 	Append("Options:\n").
 	Append("  name\n").
 	Append("       the forward alias\n")

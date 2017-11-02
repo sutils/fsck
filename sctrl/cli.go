@@ -152,6 +152,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	fmt.Fprintf(prefix, "alias seval='%v -run seval'\n", webcmd)
 	fmt.Fprintf(prefix, "alias saddmap='%v -run saddmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias srmmap='%v -run srmmap'\n", webcmd)
+	fmt.Fprintf(prefix, "alias slsmap='%v -run slsmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias smaster='%v -run smaster'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
@@ -315,16 +316,27 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			return
 		}
 		args := SpaceRegex.Split(cmds[1], 3)
-		if len(args) < 3 {
+		if len(args) < 2 {
 			err = saddmapUsage
 			return
 		}
-		_, err = t.Forward.Start(&fsck.Mapping{
-			Name:   args[0],
-			Local:  args[1],
-			Remote: args[2],
-		})
-		data = "ok\n"
+		var m *fsck.Mapping
+		if len(args) > 2 {
+			m = &fsck.Mapping{
+				Name:   args[0],
+				Local:  args[1],
+				Remote: args[2],
+			}
+		} else {
+			m = &fsck.Mapping{
+				Name:   args[0],
+				Remote: args[1],
+			}
+		}
+		_, err = t.Forward.Start(m)
+		if err == nil {
+			data = fmt.Sprintf("%v mapping %v to %v success\n", m.Name, m.Local, m.Remote)
+		}
 		return
 	case "srmmap":
 		if len(cmds) < 2 {
@@ -334,6 +346,24 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		err = t.Forward.Stop(cmds[1], len(cmds) > 2 && cmds[2] == "connected")
 		data = "ok\n"
 		return
+	case "slsmap":
+		buf := bytes.NewBuffer(nil)
+		var namemax, localmax int
+		for _, m := range t.Forward.List() {
+			namelen := len(m.Name)
+			if namemax < namelen {
+				namemax = namelen
+			}
+			locallen := len(m.Local)
+			if localmax < locallen {
+				localmax = locallen
+			}
+		}
+		var format = fmt.Sprintf(" %v%v%v %v%v%v %v\n", "%", namemax, "s", "%", localmax, "s", "%v")
+		for _, m := range t.Forward.List() {
+			fmt.Fprintf(buf, format, m.Name, m.Local, m.Remote)
+		}
+		data = buf.Bytes()
 	case "smaster":
 		var res util.Map
 		res, err = t.C.List()
@@ -360,6 +390,8 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	case "":
 		data = shelpUsage
 		return
+	case "wssh":
+
 	default:
 		err = fmt.Errorf("-error: command %v not found", line)
 	}
