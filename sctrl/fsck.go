@@ -63,6 +63,7 @@ var runClient bool
 var runServer bool
 var runLogCli bool
 var runExec bool
+var runSsh bool
 
 func regCommonFlags() {
 	flag.BoolVar(&help, "h", false, "show help")
@@ -130,11 +131,20 @@ func regExecFlags(alias bool) {
 	}
 }
 
+//
+//sctrl-ssh argument
+func regSshFlags(alias bool) {
+	if !alias {
+		flag.BoolVar(&runSsh, "ssh", false, "ssh to host")
+	}
+}
+
 func printAllUsage(code int) {
 	regClientFlags(false)
 	regCommonFlags()
 	regServerFlags(false)
 	regSlaverFlags(false)
+	regSshFlags(false)
 	regExecFlags(false)
 	_, name := filepath.Split(os.Args[0])
 	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
@@ -146,6 +156,7 @@ func printAllUsage(code int) {
 	fmt.Fprintf(os.Stderr, "        %v -lc host1\n", name)
 	fmt.Fprintf(os.Stderr, "        %v -run sadd host root:xxx@host.local\n", name)
 	fmt.Fprintf(os.Stderr, "        %v -run spick host host1\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -ssh host1 | bash\n", name)
 	fmt.Fprintf(os.Stderr, "All options:\n")
 	flag.PrintDefaults()
 	os.Exit(code)
@@ -241,6 +252,22 @@ func printExecUsage(code int, alias bool) {
 	os.Exit(code)
 }
 
+func printSshUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	if alias {
+		name = "sctrl-ssh"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl ssh version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v <name>\n", name)
+		fmt.Fprintf(os.Stderr, "        %v host1\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  eval `%v -ssh <name>`\n", name)
+		fmt.Fprintf(os.Stderr, "        eval `%v -ssh host1`\n", name)
+	}
+	os.Exit(code)
+}
+
 func main() {
 	_, name := filepath.Split(os.Args[0])
 	mode := ""
@@ -319,6 +346,25 @@ func main() {
 				printExecUsage(1, alias || name == "sctrl-exec")
 			}
 			sctrlExec(JoinArgs("", os.Args[1:]...))
+		}
+	case name == "sctrl-ssh" || mode == "-ssh":
+		for _, arg := range os.Args {
+			if arg == "-h" {
+				printSshUsage(0, alias || name == "sctrl-ssh")
+			} else if arg == "-alias" {
+				alias = true
+			}
+		}
+		if mode == "-ssh" {
+			if len(os.Args) < 3 {
+				printSshUsage(0, alias || name == "sctrl-ssh")
+			}
+			sctrlExec(JoinArgs("wssh", os.Args[2]))
+		} else {
+			if len(os.Args) < 2 {
+				printSshUsage(0, alias || name == "sctrl-ssh")
+			}
+			sctrlExec(JoinArgs("wssh", os.Args[1]))
 		}
 	case mode == "-h":
 		printAllUsage(0)

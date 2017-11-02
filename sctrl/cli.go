@@ -161,6 +161,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 }
 func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	line = strings.TrimSpace(line)
+	log.Printf("Terminal exec command:%v", line)
 	cmds := SpaceRegex.Split(line, 2)
 	switch cmds[0] {
 	case "sall":
@@ -391,7 +392,70 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		data = shelpUsage
 		return
 	case "wssh":
-
+		if len(cmds) < 2 {
+			err = fmt.Errorf("name is reqied")
+			return
+		}
+		//check session
+		var session *SshSession
+		for s := t.ss.Front(); s != nil; s = s.Next() {
+			one := s.Value.(*SshSession)
+			if one.Name == cmds[1] {
+				session = one
+				break
+			}
+		}
+		if session == nil {
+			err = fmt.Errorf("session is not found by name(%v) ", cmds[1])
+			return
+		}
+		//check forward
+		muri := fmt.Sprintf("%v://%v", session.Channel, session.URI)
+		allms := t.Forward.List()
+		var mapping *fsck.Mapping
+		for _, m := range allms {
+			if m.Remote == muri {
+				mapping = m
+				break
+			}
+		}
+		if mapping == nil {
+			var name string
+			for i := 0; i < 100; i++ {
+				if i < 1 {
+					name = session.Name
+				} else {
+					name = fmt.Sprintf("%v-%v", session.Name, i)
+				}
+				for _, m := range allms {
+					if m.Name == name {
+						name = ""
+						break
+					}
+				}
+				if len(name) > 0 {
+					break
+				}
+			}
+			if len(name) < 1 {
+				err = fmt.Errorf("too many forward by name(%v) ", cmds[1])
+				return
+			}
+			mapping = &fsck.Mapping{
+				Name:   name,
+				Remote: muri,
+			}
+			_, err = t.Forward.Start(mapping)
+			if err != nil {
+				return
+			}
+		}
+		suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.TrimPrefix(mapping.Local, ":"))
+		buf := bytes.NewBuffer(nil)
+		fmt.Fprintf(buf, "echo dail to %v,%v by %v", session.Name, session.URI, suri)
+		fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v\n", session.Password, suri)
+		//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+		data = buf.Bytes()
 	default:
 		err = fmt.Errorf("-error: command %v not found", line)
 	}
