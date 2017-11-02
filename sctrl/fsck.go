@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -19,14 +16,10 @@ import (
 	"time"
 
 	"github.com/Centny/gwf/netw/impl"
-	"github.com/kr/pty"
 
 	"github.com/Centny/gwf/netw"
 
-	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/webdav"
-
-	"github.com/sutils/readkey"
 
 	gwflog "github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/routing"
@@ -35,6 +28,7 @@ import (
 
 	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
+	"github.com/sutils/readkey"
 )
 
 const Version = "1.0.0"
@@ -254,90 +248,6 @@ func main() {
 		mode = os.Args[1]
 	}
 	switch {
-	case mode == "-sim3":
-		c := exec.Command("bash")
-		f, err := pty.Start(c)
-		if err != nil {
-			panic(err)
-		}
-		go io.Copy(os.Stdout, f)
-		for {
-			key, err := readkey.ReadKey()
-			if err != nil || bytes.Equal(key, CharTerm) {
-				break
-			}
-			// fmt.Printf("-->%v\n", key)
-			f.Write(key)
-		}
-	case mode == "-sim":
-		host, err := ParseSshHost("xx", "test://root:Asd_321@222.16.80.120:10022?pty=xterm", nil)
-		if err != nil {
-			panic(err)
-		}
-		session := NewSshSession(nil, host)
-		conn, err := net.Dial("tcp", "222.16.80.120:10022")
-		if err != nil {
-			panic(err)
-		}
-		defer readkey.Close()
-		session.Add(os.Stdout)
-		session.StartSession(conn)
-		for {
-			key, err := readkey.ReadKey()
-			if err != nil || bytes.Equal(key, CharTerm) {
-				break
-			}
-			fmt.Printf("-->%v\n", key)
-			session.Write(key)
-		}
-	case mode == "-sim2":
-		// Create client config
-		config := &ssh.ClientConfig{
-			User: "root",
-			Auth: []ssh.AuthMethod{
-				ssh.Password("sco"),
-			},
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		}
-		// Connect to ssh server
-		conn, err := ssh.Dial("tcp", "loc.m:22", config)
-		if err != nil {
-			log.Fatal("unable to connect: ", err)
-		}
-		defer conn.Close()
-		// Create a session
-		session, err := conn.NewSession()
-		if err != nil {
-			log.Fatal("unable to create session: ", err)
-		}
-		session.Stdout = os.Stdout
-		session.Stderr = os.Stderr
-		session.Stdin = os.Stdin
-		// stdin, _ := session.StdinPipe()
-		defer session.Close()
-		// Set up terminal modes
-		modes := ssh.TerminalModes{
-		// ssh.ECHO:          0,     // disable echoing
-		// ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-		// ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
-		}
-		// Request pseudo terminal
-		if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
-			log.Fatal("request for pseudo terminal failed: ", err)
-		}
-		// Start remote shell
-		if err := session.Shell(); err != nil {
-			log.Fatal("failed to start shell: ", err)
-		}
-		// for {
-		// 	key, err := readkey.ReadKey()
-		// 	if err != nil || bytes.Equal(key, CharTerm) {
-		// 		break
-		// 	}
-		// 	// fmt.Printf("-->%v\n", key)
-		// 	stdin.Write(key)
-		// }
-		session.Wait()
 	case name == "sctrl-server" || mode == "-s":
 		regCommonFlags()
 		regServerFlags(name == "sctrl-server")
@@ -486,9 +396,11 @@ func sctrlClient() {
 	if len(loginToken) < 1 {
 		for {
 			fmt.Printf("Login to %v: ", serverAddr)
+			time.Sleep(100 * time.Millisecond)
+			readkey.Open()
 			buf := []byte{}
 			for {
-				key, err := readkey.ReadKey()
+				key, err := readkey.Read()
 				if err != nil || bytes.Equal(key, CharTerm) {
 					readkey.Close()
 					os.Exit(1)

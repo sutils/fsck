@@ -5,9 +5,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/kr/pty"
+	"github.com/sutils/readkey"
 )
 
 type Cmd struct {
@@ -46,9 +48,31 @@ func (c *Cmd) String() string {
 }
 
 func (c *Cmd) Start() (err error) {
-	c.Env = append(c.Env, "PS1="+c.PS1)
-	c.pipe, err = pty.Start(c.Cmd)
+	if len(c.PS1) > 0 {
+		c.Env = append(c.Env, "PS1="+c.PS1)
+	}
+	vpty, tty, err := pty.Open()
 	if err != nil {
+		return
+	}
+	w, h := readkey.GetSize()
+	err = readkey.SetSize(vpty.Fd(), w, h)
+	if err != nil {
+		return
+	}
+	c.pipe = vpty
+	defer tty.Close()
+	c.Cmd.Stdout = tty
+	c.Cmd.Stdin = tty
+	c.Cmd.Stderr = tty
+	if c.Cmd.SysProcAttr == nil {
+		c.Cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	c.Cmd.SysProcAttr.Setctty = true
+	c.Cmd.SysProcAttr.Setsid = true
+	err = c.Cmd.Start()
+	if err != nil {
+		vpty.Close()
 		return
 	}
 	go io.Copy(c.MultiWriter, c.pipe)

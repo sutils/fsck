@@ -727,8 +727,11 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 			keydone <- 1
 		}
 	}()
+	//wait for cosole ready.
+	time.Sleep(500 * time.Millisecond)
+	readkey.Open()
 	for t.running {
-		key, err := readkey.ReadKey()
+		key, err := readkey.Read()
 		if err != nil || bytes.Equal(key, CharTerm) {
 			t.CloseExit()
 			break
