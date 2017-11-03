@@ -4,7 +4,7 @@ windows:
     panes:
       - go build && ./sctrl -s -token abc
       - go build && ./sctrl -sc -master localhost:9234 -auth abc -name test
-      - go build && ./sctrl -lc loc
+      - go build && ./sctrl-ssh.sh loc
       - go build && ./sctrl -lc debug
       - echo
       - go build && ./sctrl -c

@@ -1,8 +1,3 @@
-
-
-## Install
-
-```.shell
 go get github.com/sutils/fsck/sctrl
 ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-srv
 ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-cli
@@ -15,4 +10,4 @@ ln -s $GOPATH/src/github.com/sutils/fsck/sctrl/sctrl-ssh.sh $GOPATH/bin/sctrl-ss
 ln -s $GOPATH/src/github.com/sutils/fsck/sctrl/sctrl-scp.sh $GOPATH/bin/sctrl-scp
 chmod +x $GOPATH/bin/sctrl-ssh $GOPATH/bin/sctrl-scp
 ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-profile
-```
+

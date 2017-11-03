@@ -145,19 +145,19 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	term.Mux.Handle("/log", term.Log)
 	prefix := bytes.NewBuffer(nil)
 	fmt.Fprintf(prefix, "set +o history\n")
-	fmt.Fprintf(prefix, "alias sctrl='%v'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sadd='%v -run sadd'\n", webcmd)
-	fmt.Fprintf(prefix, "alias srm='%v -run srm'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sall='%v -run sall'\n", webcmd)
-	fmt.Fprintf(prefix, "alias spick='%v -run spick'\n", webcmd)
-	fmt.Fprintf(prefix, "alias shelp='%v -run shelp'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sexec='%v -run sexec'\n", webcmd)
-	fmt.Fprintf(prefix, "alias seval='%v -run seval'\n", webcmd)
-	fmt.Fprintf(prefix, "alias saddmap='%v -run saddmap'\n", webcmd)
-	fmt.Fprintf(prefix, "alias srmmap='%v -run srmmap'\n", webcmd)
-	fmt.Fprintf(prefix, "alias slsmap='%v -run slsmap'\n", webcmd)
-	fmt.Fprintf(prefix, "alias smaster='%v -run smaster'\n", webcmd)
-	fmt.Fprintf(prefix, "alias sprofile='%v -run sprofile'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sexec='%v/sctrl -run'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sadd='%v/sctrl -run sadd'\n", webcmd)
+	fmt.Fprintf(prefix, "alias srm='%v/sctrl -run srm'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sall='%v/sctrl -run sall'\n", webcmd)
+	fmt.Fprintf(prefix, "alias spick='%v/sctrl -run spick'\n", webcmd)
+	fmt.Fprintf(prefix, "alias shelp='%v/sctrl -run shelp'\n", webcmd)
+	fmt.Fprintf(prefix, "alias seval='%v/sctrl -run seval'\n", webcmd)
+	fmt.Fprintf(prefix, "alias saddmap='%v/sctrl -run saddmap'\n", webcmd)
+	fmt.Fprintf(prefix, "alias srmmap='%v/sctrl -run srmmap'\n", webcmd)
+	fmt.Fprintf(prefix, "alias slsmap='%v/sctrl -run slsmap'\n", webcmd)
+	fmt.Fprintf(prefix, "alias smaster='%v/sctrl -run smaster'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sprofile='%v/sctrl -run profile'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sscp='%v/sctrl-scp'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
@@ -397,62 +397,14 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		return
 	case "wssh":
 		if len(cmds) < 2 {
-			err = fmt.Errorf("name is reqied")
+			err = fmt.Errorf("echo 'name is reqied' && exit 1")
 			return
 		}
-		//check session
 		var session *SshSession
-		for s := t.ss.Front(); s != nil; s = s.Next() {
-			one := s.Value.(*SshSession)
-			if one.Name == cmds[1] {
-				session = one
-				break
-			}
-		}
-		if session == nil {
-			err = fmt.Errorf("session is not found by name(%v) ", cmds[1])
-			return
-		}
-		//check forward
-		muri := fmt.Sprintf("%v://%v", session.Channel, session.URI)
-		allms := t.Forward.List()
 		var mapping *fsck.Mapping
-		for _, m := range allms {
-			if m.Remote == muri {
-				mapping = m
-				break
-			}
-		}
-		if mapping == nil {
-			var name string
-			for i := 0; i < 100; i++ {
-				if i < 1 {
-					name = session.Name
-				} else {
-					name = fmt.Sprintf("%v-%v", session.Name, i)
-				}
-				for _, m := range allms {
-					if m.Name == name {
-						name = ""
-						break
-					}
-				}
-				if len(name) > 0 {
-					break
-				}
-			}
-			if len(name) < 1 {
-				err = fmt.Errorf("too many forward by name(%v) ", cmds[1])
-				return
-			}
-			mapping = &fsck.Mapping{
-				Name:   name,
-				Remote: muri,
-			}
-			_, err = t.Forward.Start(mapping)
-			if err != nil {
-				return
-			}
+		session, mapping, err = t.checkHostForward(cmds[1])
+		if err != nil {
+			return
 		}
 		suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.TrimPrefix(mapping.Local, ":"))
 		buf := bytes.NewBuffer(nil)
@@ -460,15 +412,138 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v $sargs\n", session.Password, suri)
 		//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
 		data = buf.Bytes()
+	case "wscp":
+		if len(cmds) < 2 {
+			err = fmt.Errorf("echo 'name is reqied' && exit 1")
+			return
+		}
+		args := SpaceRegex.Split(cmds[1], 2)
+		if len(args) < 2 {
+			err = fmt.Errorf("echo 'two path is required' && exit 1")
+			return
+		}
+		var name, src, dst string
+		var upload bool
+		if suri := strings.SplitN(args[0], ":", 2); len(suri) > 1 {
+			name = strings.TrimSpace(suri[0])
+			src = strings.TrimSpace(suri[1])
+			if len(name) < 1 || len(src) < 1 {
+				err = fmt.Errorf("echo 'souce path invalid(%v)' && exit 1", args[0])
+				return
+			}
+			dst = args[1]
+			upload = false
+		} else if suri := strings.SplitN(args[1], ":", 2); len(suri) > 1 {
+			name = strings.TrimSpace(suri[0])
+			src = args[0]
+			dst = strings.TrimSpace(suri[1])
+			if len(name) < 1 || len(dst) < 1 {
+				err = fmt.Errorf("echo 'destination path invalid(%v)' && exit 1", args[1])
+				return
+			}
+			upload = true
+		} else {
+			err = fmt.Errorf("echo 'source and destionation is not contain host, must have one' && exit 1")
+			return
+		}
+		var session *SshSession
+		var mapping *fsck.Mapping
+		session, mapping, err = t.checkHostForward(name)
+		if err != nil {
+			return
+		}
+		buf := bytes.NewBuffer(nil)
+		var suri string
+		if upload {
+			suri = fmt.Sprintf("%v@localhost:%v", session.Username, dst)
+			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
+			fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
+				session.Password, strings.TrimPrefix(mapping.Local, ":"), src, suri)
+		} else {
+			suri = fmt.Sprintf("%v@localhost:%v", session.Username, src)
+			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
+			fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
+				session.Password, strings.TrimPrefix(mapping.Local, ":"), suri, dst)
+		}
+		//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+		data = buf.Bytes()
 	case "profile":
 		buf := bytes.NewBuffer(nil)
+		for _, env := range t.Env {
+			fmt.Fprintf(buf, "%v\n", env)
+		}
 		fmt.Fprintf(buf, "%v=%v\n", KeyWebCmdURL, t.WebSrv.URL)
 		for _, m := range t.Forward.List() {
 			fmt.Fprintf(buf, "%v_local=%v\n", m.Name, m.Local)
 		}
+		for s := t.ss.Front(); s != nil; s = s.Next() {
+			one := s.Value.(*SshSession)
+			for _, env := range one.Env {
+				fmt.Fprintf(buf, "%v_%v\n", one.Name, env)
+			}
+		}
+		fmt.Fprintf(buf, "alias spick='%v spick'\n", "sctrl-exec")
+		fmt.Fprintf(buf, "alias sexec='%v sexec'\n", "sctrl-exec")
+		fmt.Fprintf(buf, "alias seval='%v seval'\n", "sctrl-exec")
 		data = buf.Bytes()
 	default:
 		err = fmt.Errorf("-error: command %v not found", line)
+	}
+	return
+}
+
+func (t *Terminal) checkHostForward(name string) (session *SshSession, mapping *fsck.Mapping, err error) {
+	//check session
+	for s := t.ss.Front(); s != nil; s = s.Next() {
+		one := s.Value.(*SshSession)
+		if one.Name == name {
+			session = one
+			break
+		}
+	}
+	if session == nil {
+		err = fmt.Errorf("echo 'session is not found by name(%v)' && exit 1", name)
+		return
+	}
+	//check forward
+	muri := fmt.Sprintf("%v://%v", session.Channel, session.URI)
+	allms := t.Forward.List()
+	for _, m := range allms {
+		if m.Remote == muri {
+			mapping = m
+			break
+		}
+	}
+	if mapping == nil {
+		var name string
+		for i := 0; i < 100; i++ {
+			if i < 1 {
+				name = session.Name
+			} else {
+				name = fmt.Sprintf("%v-%v", session.Name, i)
+			}
+			for _, m := range allms {
+				if m.Name == name {
+					name = ""
+					break
+				}
+			}
+			if len(name) > 0 {
+				break
+			}
+		}
+		if len(name) < 1 {
+			err = fmt.Errorf("echo 'too many forward by name(%v)' && exit 1", name)
+			return
+		}
+		mapping = &fsck.Mapping{
+			Name:   name,
+			Remote: muri,
+		}
+		_, err = t.Forward.Start(mapping)
+		if err != nil {
+			return
+		}
 	}
 	return
 }
@@ -681,10 +756,10 @@ func (t *Terminal) AddSession(name, uri string, connect bool, env map[string]int
 	if err != nil {
 		return
 	}
-	host.Env = append(t.Env, host.Env...)
 	fmt.Printf("add session by name(%v),channel(%v),host(%v),username(%v),password(%v)\n",
 		host.Name, host.Channel, host.URI, host.Username, host.Password)
 	session := NewSshSession(t.C, host)
+	session.PreEnv = t.Env
 	session.EnableCallback([]byte(t.CmdPrefix), t.callback)
 	session.Add(NewNamedWriter(name, t.Log))
 	if connect {

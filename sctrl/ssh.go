@@ -156,6 +156,7 @@ type SshSession struct {
 	session *ssh.Session
 	stdin   io.Writer
 	Prefix  io.Reader
+	PreEnv  []string
 }
 
 func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
@@ -235,7 +236,10 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	}
 	fmt.Printf("%v handshake success\n", s.Name)
 	s.MultiWriter.Disable = true
-	for _, env := range s.Env {
+	for _, env := range s.PreEnv {
+		fmt.Fprintf(s.stdin, "%v\n", env)
+	}
+	for _, env := range s.SshHost.Env {
 		fmt.Fprintf(s.stdin, "%v\n", env)
 	}
 	if s.Prefix != nil {

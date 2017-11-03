@@ -64,6 +64,7 @@ var runServer bool
 var runLogCli bool
 var runExec bool
 var runSsh bool
+var runScp bool
 var runProfile bool
 
 func regCommonFlags() {
@@ -136,7 +137,15 @@ func regExecFlags(alias bool) {
 //sctrl-ssh argument
 func regSshFlags(alias bool) {
 	if !alias {
-		flag.BoolVar(&runSsh, "ssh", false, "ssh to host")
+		flag.BoolVar(&runSsh, "ssh", false, "get ssh script to host")
+	}
+}
+
+//
+//sctrl-ssh argument
+func regScpFlags(alias bool) {
+	if !alias {
+		flag.BoolVar(&runScp, "scp", false, "get scp script to host")
 	}
 }
 
@@ -154,6 +163,7 @@ func printAllUsage(code int) {
 	regServerFlags(false)
 	regSlaverFlags(false)
 	regSshFlags(false)
+	regScpFlags(false)
 	regProfileFlags(false)
 	regExecFlags(false)
 	_, name := filepath.Split(os.Args[0])
@@ -265,15 +275,37 @@ func printExecUsage(code int, alias bool) {
 func printSshUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
 	if alias {
-		name = "sctrl-ssh"
+		name = "sctrl-wssh"
 	}
-	fmt.Fprintf(os.Stderr, "Sctrl ssh version %v\n", Version)
+	fmt.Fprintf(os.Stderr, "Sctrl wssh version %v\n", Version)
 	if alias {
 		fmt.Fprintf(os.Stderr, "Usage:  %v <name>\n", name)
 		fmt.Fprintf(os.Stderr, "        %v host1\n", name)
 	} else {
-		fmt.Fprintf(os.Stderr, "Usage:  eval `%v -ssh <name>`\n", name)
-		fmt.Fprintf(os.Stderr, "        eval `%v -ssh host1`\n", name)
+		fmt.Fprintf(os.Stderr, "Usage:  %v -ssh <name>\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -ssh host1\n", name)
+	}
+	os.Exit(code)
+}
+
+func printScpUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	if alias {
+		name = "sctrl-wscp"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl wscp version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v <source> <destination>\n", name)
+		fmt.Fprintf(os.Stderr, "        %v ./file1 host1:/home/\n", name)
+		fmt.Fprintf(os.Stderr, "        %v ./dir1 host1:/home/\n", name)
+		fmt.Fprintf(os.Stderr, "        %v host1:/home/file1 /tmp/\n", name)
+		fmt.Fprintf(os.Stderr, "        %v host1:/home/dir1 /tmp/\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -scp <source> <destination>\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -scp ./file1 host1:/home/\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -scp ./dir1 host1:/home/\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -scp host1:/home/file1 /tmp/\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -scp host1:/home/dir1 /tmp/\n", name)
 	}
 	os.Exit(code)
 }
@@ -371,25 +403,55 @@ func main() {
 			}
 			sctrlExec(JoinArgs("", os.Args[1:]...))
 		}
-	case name == "sctrl-ssh" || mode == "-ssh":
+	case name == "sctrl-wssh" || mode == "-ssh":
 		for _, arg := range os.Args {
 			if arg == "-h" {
-				printSshUsage(0, alias || name == "sctrl-ssh")
-			} else if arg == "-alias" {
-				alias = true
+				printSshUsage(0, alias || name == "sctrl-wssh")
 			}
 		}
+		var cmds string
 		if mode == "-ssh" {
 			if len(os.Args) < 3 {
-				printSshUsage(0, alias || name == "sctrl-ssh")
+				printSshUsage(0, name == "sctrl-wssh")
 			}
-			sctrlExec(JoinArgs("wssh", os.Args[2]))
+			cmds = JoinArgs("wssh", os.Args[2])
 		} else {
 			if len(os.Args) < 2 {
-				printSshUsage(0, alias || name == "sctrl-ssh")
+				printSshUsage(0, name == "sctrl-wssh")
 			}
-			sctrlExec(JoinArgs("wssh", os.Args[1]))
+			cmds = JoinArgs("wssh", os.Args[1])
 		}
+		code, err := execCmds(cmds, false, true, true)
+		if err != nil {
+			code = -1
+			fmt.Fprintf(os.Stdout, "echo %v && exit %v\n", err, code)
+		}
+		os.Exit(code)
+	case name == "sctrl-wscp" || mode == "-scp":
+		for _, arg := range os.Args {
+			if arg == "-h" {
+				printScpUsage(0, alias || name == "sctrl-wscp")
+			}
+		}
+		var cmds string
+		if mode == "-scp" {
+			if len(os.Args) < 4 {
+				printScpUsage(0, alias || name == "sctrl-wscp")
+			}
+			cmds = JoinArgs("wscp", os.Args[2:]...)
+		} else {
+			if len(os.Args) < 3 {
+				printScpUsage(0, alias || name == "sctrl-wscp")
+			}
+			fmt.Println(os.Args)
+			cmds = JoinArgs("wscp", os.Args[1:]...)
+		}
+		code, err := execCmds(cmds, false, false, true)
+		if err != nil {
+			code = -1
+			fmt.Fprintf(os.Stdout, "echo %v && exit %v\n", err, code)
+		}
+		os.Exit(code)
 	case name == "sctrl-profile" || mode == "-profile":
 		for _, arg := range os.Args {
 			if arg == "-h" {
@@ -514,7 +576,9 @@ func sctrlClient() {
 		}
 		login <- 1
 	}
-	webcmd, _ := filepath.Abs(os.Args[0])
+	exepath, _ := os.Executable()
+	exepath, _ = filepath.Abs(exepath)
+	webcmd, _ := filepath.Split(exepath)
 	terminal := NewTerminal(client, ps1, bash, webcmd)
 	terminal.Name = name
 	terminal.InstancePath = instancePath
@@ -538,12 +602,23 @@ func sctrlClient() {
 }
 
 func sctrlExec(cmds string) {
-	url, _, err := findWebURL("", false, time.Millisecond)
+	code, err := execCmds(cmds, true, false, false)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		fmt.Printf("-error: %v\n", err)
+		code = -1
 	}
-	os.Exit(ExecWebCmd(url+"/exec", cmds, os.Stdout))
+	if code == 200 {
+		code = 0
+	}
+	os.Exit(code)
+}
+
+func execCmds(cmds string, log, wait, single bool) (code int, err error) {
+	url, _, err := findWebURL("", log, wait, single, 5*time.Second)
+	if err == nil {
+		code, err = ExecWebCmd(url+"/exec", cmds, os.Stdout)
+	}
+	return
 }
 
 func sctrlLogCli(name ...string) {
@@ -551,7 +626,7 @@ func sctrlLogCli(name ...string) {
 	var err error
 	delay := 5 * time.Second
 	for {
-		url, last, err = findWebURL(last, true, delay)
+		url, last, err = findWebURL(last, true, true, false, delay)
 		if err != nil { //having error.
 			fmt.Println(err)
 			os.Exit(1)
@@ -607,7 +682,7 @@ func sctrlWebdav() {
 	os.Exit(1)
 }
 
-func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd string, err error) {
+func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url string, pwd string, err error) {
 	url = os.Getenv(KeyWebCmdURL)
 	if len(url) > 0 {
 		return
@@ -620,6 +695,7 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 		filepath.Join(os.Getenv("TMPDIR"), ".sctrl_instance.json"),
 		filepath.Join("/tmp", ".sctrl_instance.json"),
 	}
+	instance := os.Getenv("SCTRL_INSTANCE")
 	for {
 		for _, confPath = range allConf {
 			data, err = ioutil.ReadFile(confPath)
@@ -629,7 +705,9 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 		}
 		if data == nil {
 			if wait {
-				fmt.Printf("->instance conf is not found on %v, will try after %v\n", allConf, delay)
+				if log {
+					fmt.Printf("->instance conf is not found on %v, will try after %v\n", allConf, delay)
+				}
 				time.Sleep(delay)
 				continue
 			}
@@ -650,7 +728,11 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			if last < 1 || now-last > 5000 {
 				continue
 			}
-			nlen := len(conf.StrVal("name"))
+			name := conf.StrVal("name")
+			if len(instance) > 0 && name != instance {
+				continue
+			}
+			nlen := len(name)
 			if nlen > maxname {
 				maxname = nlen
 			}
@@ -659,7 +741,9 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 		if len(confList) < 1 {
 			//configure not found
 			if wait {
-				fmt.Printf("->instance list is empty on %v, will try after %v\n", confPath, delay)
+				if log {
+					fmt.Printf("->instance is not found on %v, will try after %v\n", confPath, delay)
+				}
 				time.Sleep(delay)
 				continue
 			}
@@ -674,7 +758,7 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 		if len(last) > 0 {
 			//the pwd is specified
 			for _, conf := range confList {
-				pwd = fmt.Sprintf("%v", conf["pwd"].(string))
+				pwd = conf.StrVal("pwd")
 				if pwd == last {
 					oneconf = conf
 					break
@@ -685,13 +769,31 @@ func findWebURL(last string, wait bool, delay time.Duration) (url string, pwd st
 			}
 			//last not foud
 			if wait {
-				fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
+				if log {
+					fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
+				}
 				time.Sleep(delay)
 				continue
 			}
 			err = fmt.Errorf("not instance for pwd(%v)", last)
 			return
 		}
+		if signle {
+			err = fmt.Errorf("more than one instance found, please pick one by export SCTRL_INSTANCE")
+			return
+		}
+		// //check whether current dir is the workspace.
+		// wd, _ := os.Getwd()
+		// for _, conf := range confList {
+		// 	pwd = conf.StrVal("pwd")
+		// 	if pwd == wd {
+		// 		oneconf = conf
+		// 		break
+		// 	}
+		// }
+		// if oneconf != nil {
+		// 	break
+		// }
 		//create instance info log.
 		buf := bytes.NewBuffer(nil)
 		format := fmt.Sprintf("%v%v%v", "%3d %", maxname, "s %v\n")

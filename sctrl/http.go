@@ -82,18 +82,14 @@ func (w *Web) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func ExecWebCmd(url string, cmds string, out io.Writer) (code int) {
+func ExecWebCmd(url string, cmds string, out io.Writer) (code int, err error) {
 	resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds="+cmds))
-	if err != nil {
-		fmt.Fprintf(out, "-error: %v\n", err)
-		code = 100
-		return
-	}
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		code = 200
-		fmt.Fprintf(out, "-error: %v\n", err)
-		return
+	if err == nil {
+		code = resp.StatusCode
+		_, err = io.Copy(out, resp.Body)
+		if err == io.EOF {
+			err = nil
+		}
 	}
 	return
 }
