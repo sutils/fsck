@@ -487,6 +487,9 @@ func sctrlClient() {
 				if key[0] == '\r' {
 					fmt.Println()
 					break
+				} else if key[0] == 127 && len(buf) > 0 { //delete
+					buf = buf[0 : len(buf)-1]
+					continue
 				}
 				buf = append(buf, key...)
 			}
