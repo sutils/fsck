@@ -20,6 +20,7 @@ type Cmd struct {
 	pipe   *os.File
 	out    *OutWriter
 	Prefix io.Reader
+	OnExit func(err error)
 }
 
 func NewCmd(name, ps1, shell string) (cmd *Cmd) {
@@ -51,17 +52,21 @@ func (c *Cmd) Start() (err error) {
 	if len(c.PS1) > 0 {
 		c.Env = append(c.Env, "PS1="+c.PS1)
 	}
-	vpty, tty, err := pty.Open()
+	//
+	var vpty, tty *os.File
+	vpty, tty, err = pty.Open()
 	if err != nil {
+		tty.Close()
+		vpty.Close()
 		return
 	}
 	w, h := readkey.GetSize()
 	err = readkey.SetSize(vpty.Fd(), w, h)
 	if err != nil {
+		tty.Close()
+		vpty.Close()
 		return
 	}
-	c.pipe = vpty
-	defer tty.Close()
 	c.Cmd.Stdout = tty
 	c.Cmd.Stdin = tty
 	c.Cmd.Stderr = tty
@@ -72,10 +77,19 @@ func (c *Cmd) Start() (err error) {
 	c.Cmd.SysProcAttr.Setsid = true
 	err = c.Cmd.Start()
 	if err != nil {
+		tty.Close()
 		vpty.Close()
 		return
 	}
-	go io.Copy(c.MultiWriter, c.pipe)
+	tty.Close()
+	c.pipe = vpty
+	//
+	go func() {
+		_, err = io.Copy(c.MultiWriter, c.pipe)
+		if c.OnExit != nil {
+			c.OnExit(err)
+		}
+	}()
 	if c.Prefix != nil {
 		io.Copy(c, c.Prefix)
 	}

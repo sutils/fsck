@@ -64,6 +64,7 @@ var runServer bool
 var runLogCli bool
 var runExec bool
 var runSsh bool
+var runProfile bool
 
 func regCommonFlags() {
 	flag.BoolVar(&help, "h", false, "show help")
@@ -139,12 +140,21 @@ func regSshFlags(alias bool) {
 	}
 }
 
+//
+//sctrl-profile argument
+func regProfileFlags(alias bool) {
+	if !alias {
+		flag.BoolVar(&runProfile, "profile", false, "show profile")
+	}
+}
+
 func printAllUsage(code int) {
 	regClientFlags(false)
 	regCommonFlags()
 	regServerFlags(false)
 	regSlaverFlags(false)
 	regSshFlags(false)
+	regProfileFlags(false)
 	regExecFlags(false)
 	_, name := filepath.Split(os.Args[0])
 	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
@@ -268,6 +278,20 @@ func printSshUsage(code int, alias bool) {
 	os.Exit(code)
 }
 
+func printProfileUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	if alias {
+		name = "sctrl-profile"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl profile version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -profile`\n", name)
+	}
+	os.Exit(code)
+}
+
 func main() {
 	_, name := filepath.Split(os.Args[0])
 	mode := ""
@@ -275,7 +299,7 @@ func main() {
 		mode = os.Args[1]
 	}
 	switch {
-	case name == "sctrl-server" || mode == "-s":
+	case name == "sctrl-srv" || name == "sctrl-server" || mode == "-s":
 		regCommonFlags()
 		regServerFlags(name == "sctrl-server")
 		flag.Parse()
@@ -287,7 +311,7 @@ func main() {
 		}
 		go sctrlWebdav()
 		sctrlServer()
-	case name == "sctrl-client" || mode == "-c":
+	case name == "sctrl-cli" || name == "sctrl-client" || mode == "-c":
 		regCommonFlags()
 		regClientFlags(name == "sctrl-client")
 		flag.Parse()
@@ -296,7 +320,7 @@ func main() {
 		}
 		go sctrlWebdav()
 		sctrlClient()
-	case name == "sctrl-slaver" || mode == "-sc":
+	case name == "sctrl-sc" || name == "sctrl-slaver" || mode == "-sc":
 		regCommonFlags()
 		regSlaverFlags(name == "sctrl-slaver")
 		flag.Parse()
@@ -312,19 +336,19 @@ func main() {
 	case name == "sctrl-log" || mode == "-lc":
 		for _, arg := range os.Args {
 			if arg == "-h" {
-				printLogCliUsage(0, alias || name == "sctrl-server")
+				printLogCliUsage(0, alias || name == "sctrl-log")
 			} else if arg == "-alias" {
 				alias = true
 			}
 		}
 		if mode == "-lc" {
 			if len(os.Args) < 3 {
-				printLogCliUsage(1, alias || name == "sctrl-server")
+				printLogCliUsage(1, alias || name == "sctrl-log")
 			}
 			sctrlLogCli(os.Args[2:]...)
 		} else {
 			if len(os.Args) < 2 {
-				printLogCliUsage(1, alias || name == "sctrl-server")
+				printLogCliUsage(1, alias || name == "sctrl-log")
 			}
 			sctrlLogCli(os.Args[1:]...)
 		}
@@ -366,6 +390,15 @@ func main() {
 			}
 			sctrlExec(JoinArgs("wssh", os.Args[1]))
 		}
+	case name == "sctrl-profile" || mode == "-profile":
+		for _, arg := range os.Args {
+			if arg == "-h" {
+				printProfileUsage(0, alias || name == "sctrl-profile")
+			} else if arg == "-alias" {
+				alias = true
+			}
+		}
+		sctrlExec("profile")
 	case mode == "-h":
 		printAllUsage(0)
 	default:

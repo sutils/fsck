@@ -114,6 +114,7 @@ type Terminal struct {
 	tidc    uint32
 	tasks   map[string]*Task
 	taskLck sync.RWMutex
+	profile *bytes.Buffer
 }
 
 func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
@@ -135,6 +136,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 		Name:         "Sctrl",
 		Forward:      fsck.NewForward(c),
 		stdout:       os.Stdout,
+		profile:      bytes.NewBuffer(nil),
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
@@ -154,6 +156,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	fmt.Fprintf(prefix, "alias srmmap='%v -run srmmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias slsmap='%v -run slsmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias smaster='%v -run smaster'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sprofile='%v -run sprofile'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
@@ -452,9 +455,16 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		}
 		suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.TrimPrefix(mapping.Local, ":"))
 		buf := bytes.NewBuffer(nil)
-		fmt.Fprintf(buf, "echo dail to %v,%v by %v", session.Name, session.URI, suri)
-		fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v\n", session.Password, suri)
+		fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: $args\"", session.Name, session.URI, suri)
+		fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v $sargs\n", session.Password, suri)
 		//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+		data = buf.Bytes()
+	case "profile":
+		buf := bytes.NewBuffer(nil)
+		fmt.Fprintf(buf, "%v=%v\n", KeyWebCmdURL, t.WebSrv.URL)
+		for _, m := range t.Forward.List() {
+			fmt.Fprintf(buf, "%v_local=%v\n", m.Name, m.Local)
+		}
 		data = buf.Bytes()
 	default:
 		err = fmt.Errorf("-error: command %v not found", line)
@@ -765,8 +775,8 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 		}
 	}
 	for _, forward := range conf.Forward {
-		if len(forward.Name) < 1 || len(forward.Local) < 1 || len(forward.Remote) < 1 {
-			fmt.Printf("forward conf %v is not correct,name/local/remote must be setted\n", MarshalAll(forward))
+		if len(forward.Name) < 1 || len(forward.Remote) < 1 {
+			fmt.Printf("forward conf %v is not correct,name/remote must be setted\n", MarshalAll(forward))
 			continue
 		}
 		err := t.AddForward(forward)
@@ -826,10 +836,14 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	//wait for cosole ready.
 	time.Sleep(500 * time.Millisecond)
 	readkey.Open()
+	ctrlc := 0
 	for t.running {
 		key, err := readkey.Read()
 		if err != nil || bytes.Equal(key, CharTerm) {
-			t.CloseExit()
+			ctrlc++
+			if ctrlc > 0 {
+				t.CloseExit()
+			}
 			break
 		}
 		keyin <- key

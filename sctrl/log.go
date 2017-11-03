@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -96,6 +97,7 @@ func (w *WebLogWriter) Write(p []byte) (n int, err error) {
 type WebLogger struct {
 	allws map[string]*WebLogWriter
 	wslck sync.RWMutex
+	all   io.Writer
 }
 
 func NewWebLogger() *WebLogger {
@@ -113,25 +115,40 @@ func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 		fmt.Fprintf(resp, "name parameter is required\n")
 		return
 	}
-	log.Printf("add web log by name:%v", ns)
+	log.Printf("add web log by name(%v) from %v", ns, req.RemoteAddr)
 	wwriter := NewWaitWriter(NewNoBufferResponseWriter(resp))
-	fmt.Fprintf(wwriter, "->web logger is started by %v\n", ns)
-	w.wslck.Lock()
-	used := []*WebLogWriter{}
-	for _, name := range strings.Split(ns, ",") {
-		ws := w.allws[name]
-		if ws == nil {
-			ws = NewWebLogWriter()
+	buf := bytes.NewBuffer(nil)
+	w.wslck.RLock()
+	fmt.Fprintf(buf, "->web logger name:\n")
+	for name := range w.allws {
+		fmt.Fprintf(buf, "  %v\n", name)
+	}
+	fmt.Fprintf(buf, "->web logger is started by %v\n", ns)
+	w.wslck.RUnlock()
+	buf.WriteTo(wwriter)
+	if ns == "all" {
+		w.all = wwriter
+		wwriter.Wait()
+		w.all = nil
+	} else {
+		w.wslck.Lock()
+		used := []*WebLogWriter{}
+		for _, name := range strings.Split(ns, ",") {
+			ws := w.allws[name]
+			if ws == nil {
+				ws = NewWebLogWriter()
+			}
+			ws.Add(wwriter)
+			used = append(used, ws)
+			w.allws[name] = ws
 		}
-		ws.Add(wwriter)
-		used = append(used, ws)
-		w.allws[name] = ws
+		w.wslck.Unlock()
+		wwriter.Wait()
+		for _, mw := range used {
+			mw.Remove(wwriter)
+		}
 	}
-	w.wslck.Unlock()
-	wwriter.Wait()
-	for _, mw := range used {
-		mw.Remove(wwriter)
-	}
+	log.Printf("web log by name(%v) is done", ns)
 }
 
 func (w *WebLogger) Write(name string, p []byte) (n int, err error) {
@@ -144,5 +161,8 @@ func (w *WebLogger) Write(name string, p []byte) (n int, err error) {
 	w.allws[name] = ws
 	w.wslck.Unlock()
 	ws.Write(p)
+	if allw := w.all; allw != nil {
+		allw.Write(p)
+	}
 	return
 }

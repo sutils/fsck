@@ -4,18 +4,12 @@
 
 ```.shell
 go get github.com/sutils/fsck/sctrl
-fullcmd=$GOPATH/bin/sctrl
-alias sctrl=$fullcmd
-alias sctrl-server="$fullcmd -s -alias"
-alias sctrl-client="$fullcmd -c -alias"
-alias sctrl-log="$fullcmd -lc -alias"
-alias sctrl-exec="$fullcmd -run -alias"
-alias sctrl-ssh="echo 'eval \`$fullcmd -ssh \$1\`' >/tmp/sctrl_ssh.sh && bash -e /tmp/sctrl_ssh.sh"
-alias sadd="$fullcmd -run sadd"
-alias srm="$fullcmd -run srm"
-alias sall="$fullcmd -run sall"
-alias spick="$fullcmd -run spick"
-alias shelp="$fullcmd -run shelp"
-alias sexec="$fullcmd -run sexec"
-alias seval="$fullcmd -run seval"
+ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-srv
+ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-cli
+ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-slaver
+ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-log
+ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-exec
+cp -f $GOPATH/src/github.com/sutils/fsck/sctrl/sctrl-ssh.sh $GOPATH/bin/sctrl-ssh
+chmod +x $GOPATH/bin/sctrl-ssh
+ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-profile
 ```

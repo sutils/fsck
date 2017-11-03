@@ -111,6 +111,7 @@ func (s *Session) writeToReader(p []byte) (n int, err error) {
 
 func (s *Session) Close() (err error) {
 	err = s.Raw.Close()
+	log.D("Session(%v) is closed", s.SID)
 	return
 }
 
