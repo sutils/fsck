@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -593,7 +594,7 @@ func (t *Terminal) Activate(shell Shell) {
 	}
 	t.last = shell.String()
 	t.activited = shell
-	fmt.Printf("%v is activated now", t.activited)
+	fmt.Printf("%v is activated now(fast tap esc to quit)", t.activited)
 	if t.activited == t.Cmd {
 		t.NotifyTitle()
 	}
@@ -800,9 +801,34 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	//
 	keyin := make(chan []byte, 10240)
 	keydone := make(chan int)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
 	go func() {
+		var key []byte
+		var escc int
+		var ctrc int
 		for t.running {
-			key := <-keyin
+			select {
+			case key = <-keyin:
+			case <-quit:
+				continue
+			}
+			if bytes.Equal(key, CharTerm) {
+				ctrc++
+				if ctrc > 3 {
+					t.CloseExit()
+				}
+			} else {
+				ctrc = 0
+			}
+			if bytes.Equal(key, CharESC) {
+				escc++
+				if escc > 2 {
+					t.CloseExit()
+				}
+			} else {
+				escc = 0
+			}
 			switch {
 			case bytes.Equal(key, KeyF1):
 				t.IdxSwitch(0)
@@ -836,14 +862,9 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 	//wait for cosole ready.
 	time.Sleep(500 * time.Millisecond)
 	readkey.Open()
-	ctrlc := 0
 	for t.running {
 		key, err := readkey.Read()
-		if err != nil || bytes.Equal(key, CharTerm) {
-			ctrlc++
-			if ctrlc > 0 {
-				t.CloseExit()
-			}
+		if err != nil {
 			break
 		}
 		keyin <- key
