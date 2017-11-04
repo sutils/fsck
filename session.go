@@ -26,10 +26,12 @@ var OK = "ok"
 
 type Session struct {
 	io.ReadWriteCloser
-	reader io.ReadCloser
-	Raw    io.WriteCloser
-	Out    io.Writer
-	SID    uint16
+	reader   io.ReadCloser
+	Raw      io.WriteCloser
+	Out      io.Writer
+	SID      uint16
+	Timeout  time.Duration
+	MaxDelay time.Duration
 }
 
 func NewSession(sid uint16, out io.Writer, raw io.WriteCloser) *Session {
@@ -41,10 +43,12 @@ func NewSession(sid uint16, out io.Writer, raw io.WriteCloser) *Session {
 		writer = raw
 	}
 	return &Session{
-		SID:    sid,
-		Out:    out,
-		reader: reader,
-		Raw:    writer,
+		SID:      sid,
+		Out:      out,
+		reader:   reader,
+		Raw:      writer,
+		Timeout:  60 * time.Second,
+		MaxDelay: 8 * time.Second,
 	}
 }
 
@@ -78,13 +82,13 @@ func (s *Session) Write(p []byte) (n int, err error) {
 		} else {
 			tempDelay *= 2
 		}
-		if max := 8 * time.Second; tempDelay > max {
-			tempDelay = max
+		if tempDelay > s.MaxDelay {
+			tempDelay = s.MaxDelay
 		}
 		log.D("Sessiion(%v) send %v data fail with %v, will retry after %v", s.SID, len(buf), err, tempDelay)
 		time.Sleep(tempDelay)
 		waited += tempDelay
-		if waited > 60*time.Second {
+		if waited > s.Timeout {
 			log.W("Server wait channel on sid(%v) fail with timeout", s.SID)
 			err = io.EOF
 			//err = fmt.Errorf("timeout")
@@ -185,6 +189,7 @@ func (s *SessionPool) Write(p []byte) (n int, err error) {
 	sid := binary.BigEndian.Uint16(p[1:])
 	session := s.Find(sid)
 	if session == nil {
+		log.D("SesssionPool(%p) find session fail by sid(%v)", s, sid)
 		err = ErrSessionNotFound
 		return
 	}

@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/netw"
@@ -36,20 +35,16 @@ func NewServer() *Server {
 	return srv
 }
 
-func (s *Server) Run(addr string, ts map[string]int) error {
+func (s *Server) Run(addr string, ts map[string]int) (err error) {
 	if ts == nil {
 		ts = map[string]int{}
 	}
 	token := util.UUID()
 	ts[token] = 1
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		err := s.Local.StartSlaver(addr, "master", token)
-		if err != nil {
-			panic(err)
-		}
-	}()
-	err := s.Master.Run(addr, ts)
+	err = s.Master.Run(addr, ts)
+	if err == nil {
+		err = s.Local.StartSlaver(addr, "master", token)
+	}
 	if err == nil {
 		s.Master.Wait()
 	}
@@ -109,11 +104,9 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	session := rc.StrVal("session")
 	if len(ctype) < 1 {
 		err = fmt.Errorf("ctype is required")
-	}
-	cid, err = m.L.RCH.OnLogin(rc, token)
-	if err != nil {
 		return
 	}
+	cid, _ = m.L.RCH.OnLogin(rc, token)
 	var old string
 	m.slck.Lock()
 	if ctype == TypeSlaver {
@@ -132,10 +125,7 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	rc.Kvs().SetVal("session", session)
 	m.slck.Unlock()
 	m.L.AddC_rc(cid, rc)
-	oldCmd := m.L.CmdC(old)
-	if oldCmd != nil {
-		oldCmd.Close()
-	}
+	m.L.CloseC(old)
 	if ctype == TypeSlaver {
 		log.D("Master accept slaver connect by name(%v) from %v", name, rc.RemoteAddr())
 	} else {
@@ -265,6 +255,22 @@ func (m *Master) OnChannelCmd(c netw.Cmd) int {
 	return m.OnClientCmd(c)
 }
 
+func (m *Master) Send(ctype, cid string, c netw.Cmd, data []byte) int {
+	cmdc := m.L.CmdC(cid)
+	if cmdc == nil {
+		c.Writeb([]byte(fmt.Sprintf("%v not found by id(%v)", ctype, cid)))
+		return -1
+	}
+	reply, err := cmdc.ExecV(ChannelCmdC, true, data)
+	if err != nil {
+		c.Writeb([]byte(err.Error()))
+		log.D("Master %v repy error %v", ctype, err)
+	} else {
+		c.Writeb(reply)
+	}
+	return 0
+}
+
 func (m *Master) OnSlaverCmd(c netw.Cmd) int {
 	name := c.Kvs().StrVal("name")
 	data := c.Data()
@@ -277,19 +283,7 @@ func (m *Master) OnSlaverCmd(c netw.Cmd) int {
 		c.Writeb([]byte(ErrSessionNotFound.Error()))
 		return 0
 	}
-	cmdc := m.L.CmdC(cid)
-	if cmdc == nil {
-		c.Writeb([]byte("client not found"))
-		return -1
-	}
-	reply, err := cmdc.ExecV(ChannelCmdC, true, data)
-	if err != nil {
-		c.Writeb([]byte(err.Error()))
-		log.D("Master client repy error %v", err)
-	} else {
-		c.Writeb(reply)
-	}
-	return 0
+	return m.Send(TypeClient, cid, c, data)
 }
 
 func (m *Master) OnClientCmd(c netw.Cmd) int {
@@ -304,19 +298,7 @@ func (m *Master) OnClientCmd(c netw.Cmd) int {
 		c.Writeb([]byte(ErrSessionNotFound.Error()))
 		return 0
 	}
-	cmdc := m.L.CmdC(cid)
-	if cmdc == nil {
-		c.Writeb([]byte("slaver not found"))
-		return -1
-	}
-	reply, err := cmdc.ExecV(ChannelCmdC, true, c.Data())
-	if err != nil {
-		c.Writeb([]byte(err.Error()))
-		log.D("Master slaver repy error %v", err)
-	} else {
-		c.Writeb(reply)
-	}
-	return 0
+	return m.Send(TypeSlaver, cid, c, data)
 }
 
 //OnConn see ConHandler for detail
@@ -363,6 +345,7 @@ type Slaver struct {
 	SP      *SessionPool
 	Channel *Channel
 	HbDelay int64
+	Auto    *rc.AutoLoginH
 	OnLogin func(a *rc.AutoLoginH, err error)
 }
 
@@ -391,6 +374,7 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 		"name":    name,
 		"session": session,
 	}
+	s.Auto = auto
 	s.R = rc.NewRC_Runner_m_j(pool.BP, rcaddr, netw.NewCCH(netw.NewQueueConH(auto, s), s))
 	s.R.Name = s.Alias
 	auto.Runner = s.R
@@ -494,6 +478,7 @@ func (c *Channel) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	session := c.SP.Remove(sid)
 	if session == nil {
 		err = fmt.Errorf("session(%v) is not found", sid)
+		return
 	}
 	val = util.Map{
 		"code": 0,
@@ -506,7 +491,7 @@ func (c *Channel) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 func (c *Channel) Close(sid uint16) (err error) {
 	session := c.SP.Find(sid)
 	if session == nil {
-		err = fmt.Errorf("session(%v) is not exists", sid)
+		err = fmt.Errorf("local session(%v) is not exists", sid)
 		return
 	}
 	defer session.Close()
@@ -514,9 +499,9 @@ func (c *Channel) Close(sid uint16) (err error) {
 		"sid": sid,
 	})
 	if err == nil {
-		log.D("Channel close session(%v) success", sid)
+		log.D("Channel close remote session(%v) success", sid)
 	} else {
-		log.D("Channel close session(%v) fail with %v", sid, err)
+		log.D("Channel close remote session(%v) fail with %v", sid, err)
 	}
 	return
 }
@@ -540,26 +525,20 @@ func (c *Channel) List() (res util.Map, err error) {
 
 func (c *Channel) Write(p []byte) (n int, err error) {
 	reply, err := c.ExecBytes(p)
-	if err != nil {
-		return
+	if err == nil {
+		message := string(reply)
+		switch message {
+		case ErrSessionClosed.Error():
+			err = ErrSessionClosed
+		case ErrSessionNotFound.Error():
+			err = ErrSessionNotFound
+		case OK:
+			err = nil
+		default:
+			err = fmt.Errorf(message)
+		}
+		n = len(p)
 	}
-	if len(reply) < 1 {
-		log.E("Channel receive empty reply")
-		err = ErrSessionClosed
-		return
-	}
-	message := string(reply)
-	switch message {
-	case ErrSessionClosed.Error():
-		err = ErrSessionClosed
-	case ErrSessionNotFound.Error():
-		err = ErrSessionNotFound
-	case OK:
-		err = nil
-	default:
-		err = fmt.Errorf(message)
-	}
-	n = len(p)
 	return
 }
 

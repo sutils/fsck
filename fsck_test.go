@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	ShowLog = 1
+	ShowLog = 2
 	go runEchoServer()
 }
 
@@ -24,12 +24,12 @@ func runEchoServer() {
 			buf := make([]byte, 1024)
 			readed, err := c.Read(buf)
 			if err != nil {
-				panic(err)
+				return
 			}
 			fmt.Printf("read=>%v\n", buf[:readed])
 			_, err = c.Write(buf[:readed])
 			if err != nil {
-				panic(err)
+				return
 			}
 			fmt.Printf("send=>%v\n", buf[:readed])
 		}(con)

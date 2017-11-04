@@ -158,8 +158,8 @@ func NewLocalListener(addr string) (l net.Listener, err error) {
 		return
 	}
 	l, err = net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		l, err = net.Listen("tcp6", "[::1]:0")
-	}
+	// if err != nil {
+	// 	l, err = net.Listen("tcp6", "[::1]:0")
+	// }
 	return
 }
