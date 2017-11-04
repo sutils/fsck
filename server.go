@@ -69,6 +69,7 @@ type Master struct {
 	clients map[string]string //client session map to connect id
 	ni2s    map[string]string //mapping <name-sid> to session
 	si2n    map[string]string //mapping <session-sid> to name
+	sidc    uint16
 }
 
 func NewMaster() *Master {
@@ -143,9 +144,11 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	if err != nil {
 		return
 	}
-	m.slck.RLock()
+	m.slck.Lock()
 	cid := m.slavers[name]
-	m.slck.RUnlock()
+	m.sidc++
+	sid := m.sidc
+	m.slck.Unlock()
 	if len(cid) < 1 {
 		err = fmt.Errorf("the channel is not found by name(%v)", name)
 		return
@@ -160,11 +163,12 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	res, err := cmdc.Exec_m("dial", util.Map{
 		"uri":  uri,
 		"name": name,
+		"sid":  sid,
 	})
 	if err != nil {
 		return
 	}
-	sid := uint16(res.IntVal("sid"))
+	// sid := uint16(res.IntVal("sid"))
 
 	m.slck.Lock()
 	m.ni2s[fmt.Sprintf("%v-%v", name, sid)] = session
@@ -379,6 +383,7 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	s.R.Name = s.Alias
 	auto.Runner = s.R
 	s.Channel = NewChannel(s.R.RCBH, s.R.RCM_Con.RC_Con, s.R.RCM_Con, s.R.RCM_S, s.SP)
+	s.Channel.Name = ctype
 	s.R.Start()
 	if s.HbDelay > 0 {
 		s.R.HbDelay = s.HbDelay
@@ -421,11 +426,12 @@ func (s *Slaver) Close() error {
 }
 
 type Channel struct {
-	BH *impl.OBDH
-	RC *impl.RC_Con
-	RM *impl.RCM_Con
-	RS *impl.RCM_S
-	SP *SessionPool
+	Name string
+	BH   *impl.OBDH
+	RC   *impl.RC_Con
+	RM   *impl.RCM_Con
+	RS   *impl.RCM_S
+	SP   *SessionPool
 }
 
 func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S, sp *SessionPool) *Channel {
@@ -449,13 +455,15 @@ func (c *Channel) ExecBytes(args []byte) (reply []byte, err error) {
 
 func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	var uri string
+	var sid uint16
 	err = rc.ValidF(`
 		uri,R|S,L:0;
-		`, &uri)
+		sid,R|I,R:0;
+		`, &uri, &sid)
 	if err != nil {
 		return
 	}
-	session, err := c.SP.Dail(uri, c)
+	session, err := c.SP.Dail(sid, uri, c)
 	if err != nil {
 		return
 	}
@@ -463,7 +471,7 @@ func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		"uri": uri,
 		"sid": session.SID,
 	}
-	log.D("Channel create session by uri(%v) is success with sid(%v)", uri, session.SID)
+	log.D("Channel(%v) create session by uri(%v) is success with sid(%v)", c.Name, uri, session.SID)
 	return
 }
 
@@ -484,7 +492,7 @@ func (c *Channel) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		"code": 0,
 		"sid":  session.SID,
 	}
-	log.D("Channel remove session(%v) success", session.SID)
+	log.D("Channel(%v) remove session(%v) success", c.Name, session.SID)
 	return
 }
 
@@ -499,9 +507,9 @@ func (c *Channel) Close(sid uint16) (err error) {
 		"sid": sid,
 	})
 	if err == nil {
-		log.D("Channel close remote session(%v) success", sid)
+		log.D("Channel(%v) close remote session(%v) success", c.Name, sid)
 	} else {
-		log.D("Channel close remote session(%v) fail with %v", sid, err)
+		log.D("Channel(%v) close remote session(%v) fail with %v", c.Name, sid, err)
 	}
 	return
 }
@@ -513,7 +521,7 @@ func (c *Channel) Dial(name, uri string) (sid uint16, err error) {
 	})
 	if err == nil {
 		sid = uint16(res.IntVal("sid"))
-		log.D("Channel dial to %v by name(%v) success with sid(%v)", uri, name, sid)
+		log.D("Channel(%v) dial to %v by name(%v) success with sid(%v)", c.Name, uri, name, sid)
 	}
 	return
 }
@@ -558,7 +566,7 @@ func (c *Channel) DialSession(name, uri string) (session *Session, err error) {
 	sid, err := c.Dial(name, uri)
 	if err == nil {
 		session = c.SP.Start(sid, c)
-		log.D("Channel dial to %v on channel(%v) success with %v", uri, name, sid)
+		log.D("Channel(%v) dial to %v on channel(%v) success with %v", c.Name, uri, name, sid)
 	}
 	return
 }

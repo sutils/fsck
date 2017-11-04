@@ -120,9 +120,8 @@ func (s *Session) Close() (err error) {
 }
 
 type SessionPool struct {
-	ss   map[uint16]*Session
-	sidc uint16
-	lck  sync.RWMutex
+	ss  map[uint16]*Session
+	lck sync.RWMutex
 }
 
 func NewSessionPool() *SessionPool {
@@ -132,15 +131,11 @@ func NewSessionPool() *SessionPool {
 	}
 }
 
-func (s *SessionPool) Dail(uri string, out io.Writer) (session *Session, err error) {
+func (s *SessionPool) Dail(sid uint16, uri string, out io.Writer) (session *Session, err error) {
 	raw, err := net.Dial("tcp", uri)
 	if err != nil {
 		return
 	}
-	s.lck.Lock()
-	defer s.lck.Unlock()
-	s.sidc++
-	sid := s.sidc
 	session = s.start(sid, out, raw)
 	go func() {
 		io.Copy(session, raw)
@@ -152,12 +147,12 @@ func (s *SessionPool) Dail(uri string, out io.Writer) (session *Session, err err
 }
 
 func (s *SessionPool) Start(sid uint16, out io.Writer) (session *Session) {
-	s.lck.Lock()
-	defer s.lck.Unlock()
 	return s.start(sid, out, nil)
 }
 
 func (s *SessionPool) start(sid uint16, out io.Writer, raw io.WriteCloser) (session *Session) {
+	s.lck.Lock()
+	defer s.lck.Unlock()
 	session = NewSession(sid, out, raw)
 	s.ss[sid] = session
 	return

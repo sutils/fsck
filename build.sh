@@ -13,6 +13,7 @@ echo "Installing Dependence"
 echo "Running Test"
 pkgs="\
  github.com/sutils/fsck\
+ github.com/sutils/fsck/sctrl\
 "
 
 echo "mode: set" > a.out

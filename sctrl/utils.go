@@ -9,7 +9,7 @@ import (
 )
 
 type OutWriter struct {
-	out      io.Writer
+	Out      io.Writer
 	buf      []byte
 	lck      sync.RWMutex
 	Buffered bool
@@ -55,29 +55,11 @@ func (b *OutWriter) Write(p []byte) (n int, err error) {
 			}
 		}
 	}
-	if b.out != nil {
-		n, err = b.out.Write(p)
+	if b.Out != nil {
+		n, err = b.Out.Write(p)
 	} else {
-		if b.Buffered {
-			b.buf = append(b.buf, p...)
-		}
 		n = len(p)
 	}
-	return
-}
-
-func (b *OutWriter) SetOut(out io.Writer) {
-	b.lck.Lock()
-	defer b.lck.Unlock()
-	b.out = out
-	if len(b.buf) > 0 {
-		b.out.Write(b.buf)
-		b.buf = nil
-	}
-}
-
-func (b *OutWriter) GetOut() (out io.Writer) {
-	out = b.out
 	return
 }
 
@@ -148,11 +130,7 @@ func JoinArgs(cmd string, args ...string) string {
 	}
 	for _, arg := range realArgs {
 		if strings.Contains(arg, " ") {
-			if strings.Contains(arg, "'") {
-				nargs = append(nargs, "'"+arg+"'")
-			} else {
-				nargs = append(nargs, "\""+arg+"\"")
-			}
+			nargs = append(nargs, "\""+arg+"\"")
 		} else {
 			nargs = append(nargs, arg)
 		}

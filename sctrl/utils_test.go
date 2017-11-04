@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 )
@@ -58,6 +59,42 @@ func TestOutWriter(t *testing.T) {
 	fmt.Println("done6--->")
 	if string(cmd) != "done6" {
 		t.Error(cmd)
+		return
+	}
+}
+
+func TestMultiWriter(t *testing.T) {
+	mw := NewMultiWriter()
+	buf := bytes.NewBuffer(nil)
+	mw.Add(buf)
+	fmt.Fprintf(mw, "abc")
+	if !bytes.Equal(buf.Bytes(), []byte("abc")) {
+		t.Error("error")
+		return
+	}
+	mw.Remove(buf)
+	fmt.Fprintf(mw, "abc")
+	if !bytes.Equal(buf.Bytes(), []byte("abc")) {
+		t.Error("error")
+		return
+	}
+}
+
+func TestJoinArgs(t *testing.T) {
+	if JoinArgs("a") != "a" {
+		t.Error("erro")
+		return
+	}
+	if JoinArgs("a", "b") != "a b" {
+		t.Error("erro")
+		return
+	}
+	if JoinArgs("", "b") != "b" {
+		t.Error("erro")
+		return
+	}
+	if JoinArgs("", "b", "xx ss") != "b \"xx ss\"" {
+		t.Error("erro")
 		return
 	}
 }

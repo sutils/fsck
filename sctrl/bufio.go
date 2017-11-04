@@ -2,7 +2,6 @@ package main
 
 import (
 	"io"
-	"unicode/utf8"
 )
 
 // buffered output
@@ -40,21 +39,8 @@ func NewBufferedWriterSize(w io.Writer, size int) *BufferedWriter {
 	}
 }
 
-// NewBufferedWriter returns a new BufferedWriter whose buffer has the default size.
-func NewBufferedWriter(w io.Writer) *BufferedWriter {
-	return NewBufferedWriterSize(w, defaultBufSize)
-}
-
 func (b *BufferedWriter) Bytes() []byte {
 	return b.buf[0:b.n]
-}
-
-// Reset discards any unflushed buffered data, clears any error, and
-// resets b to write its output to w.
-func (b *BufferedWriter) Reset(w io.Writer) {
-	b.err = nil
-	b.n = 0
-	b.wr = w
 }
 
 // Flush writes any buffered data to the underlying io.BufferedWriter.
@@ -110,70 +96,6 @@ func (b *BufferedWriter) Write(p []byte) (nn int, err error) {
 		return nn, b.err
 	}
 	n := copy(b.buf[b.n:], p)
-	b.n += n
-	nn += n
-	return nn, nil
-}
-
-// WriteByte writes a single byte.
-func (b *BufferedWriter) WriteByte(c byte) error {
-	if b.err != nil {
-		return b.err
-	}
-	if b.Available() <= 0 && b.Flush() != nil {
-		return b.err
-	}
-	b.buf[b.n] = c
-	b.n++
-	return nil
-}
-
-// WriteRune writes a single Unicode code point, returning
-// the number of bytes written and any error.
-func (b *BufferedWriter) WriteRune(r rune) (size int, err error) {
-	if r < utf8.RuneSelf {
-		err = b.WriteByte(byte(r))
-		if err != nil {
-			return 0, err
-		}
-		return 1, nil
-	}
-	if b.err != nil {
-		return 0, b.err
-	}
-	n := b.Available()
-	if n < utf8.UTFMax {
-		if b.Flush(); b.err != nil {
-			return 0, b.err
-		}
-		n = b.Available()
-		if n < utf8.UTFMax {
-			// Can only happen if buffer is silly small.
-			return b.WriteString(string(r))
-		}
-	}
-	size = utf8.EncodeRune(b.buf[b.n:], r)
-	b.n += size
-	return size, nil
-}
-
-// WriteString writes a string.
-// It returns the number of bytes written.
-// If the count is less than len(s), it also returns an error explaining
-// why the write is short.
-func (b *BufferedWriter) WriteString(s string) (int, error) {
-	nn := 0
-	for len(s) > b.Available() && b.err == nil {
-		n := copy(b.buf[b.n:], s)
-		b.n += n
-		nn += n
-		s = s[n:]
-		b.Flush()
-	}
-	if b.err != nil {
-		return nn, b.err
-	}
-	n := copy(b.buf[b.n:], s)
 	b.n += n
 	nn += n
 	return nn, nil

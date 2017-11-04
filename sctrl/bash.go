@@ -21,6 +21,7 @@ type Cmd struct {
 	out    *OutWriter
 	Prefix io.Reader
 	OnExit func(err error)
+	Resize bool
 }
 
 func NewCmd(name, ps1, shell string) (cmd *Cmd) {
@@ -30,14 +31,11 @@ func NewCmd(name, ps1, shell string) (cmd *Cmd) {
 		Cmd:         exec.Command(shell),
 		out:         NewOutWriter(),
 		MultiWriter: NewMultiWriter(),
+		Resize:      true,
 	}
 	cmd.MultiWriter.Add(cmd.out)
 	cmd.Env = os.Environ()
 	return
-}
-
-func (c *Cmd) AddEnv(env ...string) {
-	c.Env = append(c.Env, env...)
 }
 
 func (c *Cmd) AddEnvf(format string, args ...interface{}) {
@@ -60,12 +58,14 @@ func (c *Cmd) Start() (err error) {
 		vpty.Close()
 		return
 	}
-	w, h := readkey.GetSize()
-	err = readkey.SetSize(vpty.Fd(), w, h)
-	if err != nil {
-		tty.Close()
-		vpty.Close()
-		return
+	if c.Resize {
+		w, h := readkey.GetSize()
+		err = readkey.SetSize(vpty.Fd(), w, h)
+		if err != nil {
+			tty.Close()
+			vpty.Close()
+			return
+		}
 	}
 	c.Cmd.Stdout = tty
 	c.Cmd.Stdin = tty
@@ -108,4 +108,9 @@ func (c *Cmd) DisableCallback() {
 func (c *Cmd) Write(p []byte) (n int, err error) {
 	n, err = c.pipe.Write(p)
 	return
+}
+
+func (c *Cmd) Close() error {
+	c.DisableCallback()
+	return c.pipe.Close()
 }

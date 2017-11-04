@@ -121,7 +121,7 @@ func TestForwad(t *testing.T) {
 	}
 	forward.Stop("x1", true)
 	forward.Stop("x2", true)
-	forward.Stop("x3", true)
+	// forward.Stop("x3", true)
 	//test error
 	{
 		err = forward.Stop("not", false)
@@ -130,6 +130,7 @@ func TestForwad(t *testing.T) {
 			return
 		}
 	}
+	forward.Close()
 	time.Sleep(time.Second)
 	client.Close()
 	slaver.Close()

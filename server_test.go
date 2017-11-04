@@ -113,8 +113,7 @@ func TestRc(t *testing.T) {
 			return
 		}
 		//mock remote session not found
-		client.SP.sidc = 1000
-		session, err := client.SP.Dail("localhost:9392", ioutil.Discard)
+		session, err := client.SP.Dail(100, "localhost:9392", ioutil.Discard)
 		if err != nil {
 			t.Error(err)
 			return
@@ -126,7 +125,7 @@ func TestRc(t *testing.T) {
 			return
 		}
 		//mock remote clinet not found
-		session, err = client.SP.Dail("localhost:9392", ioutil.Discard)
+		session, err = client.SP.Dail(101, "localhost:9392", ioutil.Discard)
 		if err != nil {
 			t.Error(err)
 			return

@@ -5,10 +5,13 @@ import (
 	"net"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestParseSshHost(t *testing.T) {
-	host, err := ParseSshHost("abc", "root@loc.m", nil)
+	host, err := ParseSshHost("abc", "root@loc.m", map[string]interface{}{
+		"n": 1,
+	})
 	if err != nil || host.Channel != "master" || host.Username != "root" || host.URI != "loc.m:22" {
 		fmt.Println(err)
 		t.Error(host)
@@ -32,6 +35,11 @@ func TestParseSshHost(t *testing.T) {
 		host.Pty != "vt100" {
 		fmt.Println(err)
 		t.Error(host)
+		return
+	}
+	_, err = ParseSshHost("abc", "mx://%Xx", nil)
+	if err == nil {
+		t.Error(err)
 		return
 	}
 }
@@ -65,4 +73,10 @@ func TestScp(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	sesson.conn = NewSshNetConn("uri string", nil)
+	sesson.conn.SetDeadline(time.Now())
+	sesson.conn.SetReadDeadline(time.Now())
+	sesson.conn.SetWriteDeadline(time.Now())
+	sesson.conn.LocalAddr().Network()
+	fmt.Println(sesson.conn.RemoteAddr().String())
 }

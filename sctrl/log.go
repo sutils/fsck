@@ -61,16 +61,22 @@ func (w *WaitWriter) Wait() error {
 	return <-w.wait
 }
 
+func (w *WaitWriter) Close() error {
+	w.wait <- io.EOF
+	close(w.wait)
+	return nil
+}
+
 type WebLogWriter struct {
 	*MultiWriter
 	Buf *BufferedWriter
 	lck sync.RWMutex
 }
 
-func NewWebLogWriter() *WebLogWriter {
+func NewWebLogWriter(buffered int) *WebLogWriter {
 	return &WebLogWriter{
 		MultiWriter: NewMultiWriter(),
-		Buf:         NewBufferedWriterSize(ioutil.Discard, 1024*1024),
+		Buf:         NewBufferedWriterSize(ioutil.Discard, buffered),
 		lck:         sync.RWMutex{},
 	}
 }
@@ -95,17 +101,21 @@ func (w *WebLogWriter) Write(p []byte) (n int, err error) {
 }
 
 type WebLogger struct {
-	Name  string
-	allws map[string]*WebLogWriter
-	wslck sync.RWMutex
-	all   io.Writer
+	Name     string
+	allws    map[string]*WebLogWriter
+	wslck    sync.RWMutex
+	all      io.WriteCloser
+	Buffered int
+	allreq   map[string]*WaitWriter
 }
 
-func NewWebLogger(name string) *WebLogger {
+func NewWebLogger(name string, buffered int) *WebLogger {
 	return &WebLogger{
-		Name:  name,
-		allws: map[string]*WebLogWriter{},
-		wslck: sync.RWMutex{},
+		Name:     name,
+		allws:    map[string]*WebLogWriter{},
+		wslck:    sync.RWMutex{},
+		Buffered: buffered,
+		allreq:   map[string]*WaitWriter{},
 	}
 }
 
@@ -129,16 +139,20 @@ func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	w.wslck.RUnlock()
 	buf.WriteTo(wwriter)
 	if ns == "all" {
+		w.wslck.Lock()
+		w.allreq[fmt.Sprintf("%p", wwriter)] = wwriter
 		w.all = wwriter
+		w.wslck.Unlock()
 		wwriter.Wait()
 		w.all = nil
 	} else {
 		w.wslck.Lock()
+		w.allreq[fmt.Sprintf("%p", wwriter)] = wwriter
 		used := []*WebLogWriter{}
 		for _, name := range strings.Split(ns, ",") {
 			ws := w.allws[name]
 			if ws == nil {
-				ws = NewWebLogWriter()
+				ws = NewWebLogWriter(w.Buffered)
 			}
 			ws.Add(wwriter)
 			used = append(used, ws)
@@ -150,6 +164,9 @@ func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			mw.Remove(wwriter)
 		}
 	}
+	w.wslck.Lock()
+	delete(w.allreq, fmt.Sprintf("%p", wwriter))
+	w.wslck.Unlock()
 	log.Printf("web log by name(%v) is done", ns)
 }
 
@@ -158,7 +175,7 @@ func (w *WebLogger) Write(name string, p []byte) (n int, err error) {
 	w.wslck.Lock()
 	ws := w.allws[name]
 	if ws == nil {
-		ws = NewWebLogWriter()
+		ws = NewWebLogWriter(w.Buffered)
 	}
 	w.allws[name] = ws
 	w.wslck.Unlock()
@@ -167,4 +184,13 @@ func (w *WebLogger) Write(name string, p []byte) (n int, err error) {
 		allw.Write(p)
 	}
 	return
+}
+
+func (w *WebLogger) Close() error {
+	w.wslck.Lock()
+	for _, w := range w.allreq {
+		w.Close()
+	}
+	w.wslck.Unlock()
+	return nil
 }

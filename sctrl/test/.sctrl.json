@@ -1,0 +1,57 @@
+{
+    "name": "Sctrl",
+    "server": "localhost:9234",
+    "login": "",
+    "bash": "/bin/bash",
+    "ps1": "Sctrl \\W>",
+    "instance": "/tmp/.sctrl_instance.json",
+    "hosts": [
+        {
+            "name": "loc",
+            "uri": "test://root:sco@loc.m?pty=vt100",
+            "startup": 0,
+            "env": {
+                "name1": "value2",
+                "name2": "value3"
+            }
+        },
+        {
+            "name": "",
+            "uri": "test://root:sco@loc.m?pty=vt100",
+            "startup": 0,
+            "env": {
+                "name1": "value2",
+                "name2": "value3"
+            }
+        },
+        {
+            "name": "locxx",
+            "uri": "test://root:sco@lo%10X%c.m?pty=vt100",
+            "startup": 0,
+            "env": {
+                "name1": "value2",
+                "name2": "value3"
+            }
+        }
+    ],
+    "forward": [
+        {
+            "name": "loc",
+            "local": ":2943",
+            "remote": "test://loc.m:80"
+        },
+        {
+            "name": "",
+            "local": ":2943",
+            "remote": "test://loc.m:80"
+        },
+        {
+            "name": "locxxx",
+            "local": "xx",
+            "remote": "test://loc.m:80"
+        }
+    ],
+    "env": {
+        "name1": "value1"
+    }
+}

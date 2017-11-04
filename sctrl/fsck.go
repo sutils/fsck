@@ -33,6 +33,11 @@ import (
 
 const Version = "1.0.0"
 
+var exitf = func(code int) {
+	readkey.Close()
+	os.Exit(code)
+}
+
 type ArrayFlags []string
 
 func (a *ArrayFlags) String() string {
@@ -97,6 +102,9 @@ var wsconf string
 var bash string
 var ps1 string
 var instancePath string
+var input chan []byte
+var webcmd string
+var buffered int = 1024 * 1024
 
 func regClientFlags(alias bool) {
 	flag.StringVar(&serverAddr, "server", "", "the sctrl server address")
@@ -179,7 +187,7 @@ func printAllUsage(code int) {
 	fmt.Fprintf(os.Stderr, "        %v -ssh host1 | bash\n", name)
 	fmt.Fprintf(os.Stderr, "All options:\n")
 	flag.PrintDefaults()
-	os.Exit(code)
+	exitf(code)
 }
 
 func printServerUsage(code int, alias bool) {
@@ -197,7 +205,7 @@ func printServerUsage(code int, alias bool) {
 	}
 	fmt.Fprintf(os.Stderr, "Server options:\n")
 	flag.PrintDefaults()
-	os.Exit(code)
+	exitf(code)
 }
 
 func printClientUsage(code int, alias bool) {
@@ -215,7 +223,7 @@ func printClientUsage(code int, alias bool) {
 	}
 	fmt.Fprintf(os.Stderr, "Client options:\n")
 	flag.PrintDefaults()
-	os.Exit(code)
+	exitf(code)
 }
 
 func printSlaverUsage(code int, alias bool) {
@@ -233,7 +241,7 @@ func printSlaverUsage(code int, alias bool) {
 	}
 	fmt.Fprintf(os.Stderr, "Slaver options:\n")
 	flag.PrintDefaults()
-	os.Exit(code)
+	exitf(code)
 }
 
 func printLogCliUsage(code int, alias bool) {
@@ -251,7 +259,7 @@ func printLogCliUsage(code int, alias bool) {
 		fmt.Fprintf(os.Stderr, "        %v -lc debug\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -lc host1\n", name)
 	}
-	os.Exit(code)
+	exitf(code)
 }
 
 func printExecUsage(code int, alias bool) {
@@ -269,7 +277,7 @@ func printExecUsage(code int, alias bool) {
 		fmt.Fprintf(os.Stderr, "        %v -run sadd host root:xxx@host.local\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -run spick host host1\n", name)
 	}
-	os.Exit(code)
+	exitf(code)
 }
 
 func printSshUsage(code int, alias bool) {
@@ -285,7 +293,7 @@ func printSshUsage(code int, alias bool) {
 		fmt.Fprintf(os.Stderr, "Usage:  %v -ssh <name>\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -ssh host1\n", name)
 	}
-	os.Exit(code)
+	exitf(code)
 }
 
 func printScpUsage(code int, alias bool) {
@@ -307,7 +315,7 @@ func printScpUsage(code int, alias bool) {
 		fmt.Fprintf(os.Stderr, "        %v -scp host1:/home/file1 /tmp/\n", name)
 		fmt.Fprintf(os.Stderr, "        %v -scp host1:/home/dir1 /tmp/\n", name)
 	}
-	os.Exit(code)
+	exitf(code)
 }
 
 func printProfileUsage(code int, alias bool) {
@@ -321,7 +329,7 @@ func printProfileUsage(code int, alias bool) {
 	} else {
 		fmt.Fprintf(os.Stderr, "Usage:  %v -profile`\n", name)
 	}
-	os.Exit(code)
+	exitf(code)
 }
 
 func main() {
@@ -361,7 +369,7 @@ func main() {
 		}
 		if len(masterAddr) < 1 || len(slaverToken) < 1 || len(slaverName) < 1 {
 			flag.Usage()
-			os.Exit(1)
+			exitf(1)
 		}
 		go sctrlWebdav()
 		sctrlSlaver()
@@ -426,7 +434,7 @@ func main() {
 			code = -1
 			fmt.Fprintf(os.Stdout, "echo %v && exit %v\n", err, code)
 		}
-		os.Exit(code)
+		exitf(code)
 	case name == "sctrl-wscp" || mode == "-scp":
 		for _, arg := range os.Args {
 			if arg == "-h" {
@@ -451,7 +459,7 @@ func main() {
 			code = -1
 			fmt.Fprintf(os.Stdout, "echo %v && exit %v\n", err, code)
 		}
-		os.Exit(code)
+		exitf(code)
 	case name == "sctrl-profile" || mode == "-profile":
 		for _, arg := range os.Args {
 			if arg == "-h" {
@@ -468,6 +476,8 @@ func main() {
 	}
 }
 
+var server *fsck.Server
+
 func sctrlServer() {
 	log.Printf("start sctrl server by listen(%v),loglevel(%v),token(%v)", listen, loglevel, tokenList)
 	fsck.ShowLog = loglevel
@@ -479,12 +489,12 @@ func sctrlServer() {
 	for _, token := range tokenList {
 		tokens[token] = 1
 	}
-	server := fsck.NewServer()
+	server = fsck.NewServer()
 	server.HbDelay = int64(hbdelay)
 	err := server.Run(listen, tokens)
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		exitf(1)
 	}
 	fmt.Println(err)
 }
@@ -500,6 +510,8 @@ func sctrlSlaver() {
 	<-wait
 }
 
+var terminal *Terminal
+
 func sctrlClient() {
 	fsck.ShowLog = loglevel
 	netw.ShowLog = loglevel > 2
@@ -509,17 +521,19 @@ func sctrlClient() {
 	var client *fsck.Slaver
 	var name = "Sctrl"
 	if len(serverAddr) < 1 {
-		pwd, _ := os.Getwd()
 		conf, err = ReadWorkConf(wsconf)
 		if err != nil {
-			fmt.Printf("read %v/.sctrl.json fail, %v", pwd, err)
-			os.Exit(1)
+			fmt.Printf("read %v fail, %v", wsconf, err)
+			exitf(1)
 		}
-		serverAddr, loginToken = conf.SrvAddr, conf.Login
+		serverAddr = conf.SrvAddr
 		if len(serverAddr) < 1 {
 			fmt.Println("server config is empty")
 			flag.Usage()
-			os.Exit(1)
+			exitf(1)
+		}
+		if len(conf.Login) > 0 {
+			loginToken = conf.Login
 		}
 		if len(conf.PS1) > 0 {
 			ps1 = conf.PS1
@@ -544,7 +558,7 @@ func sctrlClient() {
 				key, err := readkey.Read()
 				if err != nil || bytes.Equal(key, CharTerm) {
 					readkey.Close()
-					os.Exit(1)
+					exitf(1)
 				}
 				if key[0] == '\r' {
 					fmt.Println()
@@ -571,15 +585,16 @@ func sctrlClient() {
 		if err != nil {
 			time.Sleep(500 * time.Millisecond)
 			fmt.Printf("\nlogin to %v fail with %v\n", serverAddr, err)
-			readkey.Close()
-			os.Exit(1)
+			exitf(1)
 		}
 		login <- 1
 	}
-	exepath, _ := os.Executable()
-	exepath, _ = filepath.Abs(exepath)
-	webcmd, _ := filepath.Split(exepath)
-	terminal := NewTerminal(client, name, ps1, bash, webcmd)
+	if len(webcmd) < 1 {
+		exepath, _ := os.Executable()
+		exepath, _ = filepath.Abs(exepath)
+		webcmd, _ = filepath.Split(exepath)
+	}
+	terminal = NewTerminal(client, name, ps1, bash, webcmd, input == nil, buffered)
 	terminal.InstancePath = instancePath
 	for key, val := range conf.Env {
 		terminal.Env = append(terminal.Env, fmt.Sprintf("%v=%v", key, val))
@@ -593,11 +608,21 @@ func sctrlClient() {
 	err = client.StartClient(serverAddr, util.UUID(), loginToken)
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		exitf(1)
 	}
 	fmt.Printf("%v is connected\n", serverAddr)
 	<-login
-	terminal.Proc(conf)
+	terminal.Start(conf)
+	if input == nil {
+		terminal.ProcReadkey()
+		return
+	}
+	for key := range input {
+		if key == nil {
+			break
+		}
+		terminal.Write(key)
+	}
 }
 
 func sctrlExec(cmds string) {
@@ -609,7 +634,7 @@ func sctrlExec(cmds string) {
 	if code == 200 {
 		code = 0
 	}
-	os.Exit(code)
+	exitf(code)
 }
 
 func execCmds(cmds string, log, wait, single bool) (code int, err error) {
@@ -628,7 +653,7 @@ func sctrlLogCli(name ...string) {
 		url, last, err = findWebURL(last, true, true, false, delay)
 		if err != nil { //having error.
 			fmt.Println(err)
-			os.Exit(1)
+			exitf(1)
 		}
 		name := strings.Join(name, ",")
 		_, err := ExecWebLog(url+"/log", name, os.Stdout)
@@ -658,27 +683,21 @@ func sctrlWebdav() {
 		},
 	}
 	routing.Shared.HFilterFunc("^/.*$", func(hs *routing.HTTPSession) routing.HResult {
-		if len(webdavUser) < 1 {
-			return routing.HRES_CONTINUE
+		if len(webdavUser) > 0 {
+			usr, pwd, ok := hs.R.BasicAuth()
+			if !ok || fmt.Sprintf("%v:%v", usr, pwd) != webdavUser {
+				hs.W.WriteHeader(403)
+				hs.W.Write([]byte("not access\n"))
+				return routing.HRES_RETURN
+			}
 		}
-		usr, pwd, ok := hs.R.BasicAuth()
-		if !ok {
-			hs.W.WriteHeader(403)
-			hs.W.Write([]byte("not access\n"))
-			return routing.HRES_RETURN
-		}
-		if fmt.Sprintf("%v:%v", usr, pwd) == webdavUser {
-			return routing.HRES_CONTINUE
-		}
-		hs.W.Write([]byte("not access\n"))
-		hs.W.WriteHeader(403)
-		return routing.HRES_RETURN
+		return routing.HRES_CONTINUE
 	})
 	routing.Shared.Handler("^/dav/.*$", webdav)
 	log.Printf("start webdav server by listen(%v),davpth(%v)", webdavAddr, webdavPath)
 	err := routing.ListenAndServe(webdavAddr)
 	fmt.Println(err)
-	os.Exit(1)
+	exitf(1)
 }
 
 func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url string, pwd string, err error) {

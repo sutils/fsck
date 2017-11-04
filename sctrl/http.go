@@ -86,9 +86,20 @@ func ExecWebCmd(url string, cmds string, out io.Writer) (code int, err error) {
 	resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds="+cmds))
 	if err == nil {
 		code = resp.StatusCode
-		_, err = io.Copy(out, resp.Body)
+		callback := make(chan []byte, 3)
+		outw := NewOutWriter()
+		outw.Out = out
+		outw.EnableCallback([]byte(WebCmdPrefix), callback)
+		_, err = io.Copy(outw, resp.Body)
 		if err == io.EOF {
 			err = nil
+		}
+		if err == nil {
+			callback <- nil
+			reply := <-callback
+			if reply != nil && string(reply) != "ok" {
+				err = fmt.Errorf("%v", string(reply))
+			}
 		}
 	}
 	return

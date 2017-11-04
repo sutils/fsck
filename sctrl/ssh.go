@@ -124,14 +124,10 @@ func ParseSshHost(name, uri string, env map[string]interface{}) (host *SshHost, 
 	if !strings.Contains(suri, ":") {
 		suri = suri + ":22"
 	}
-	channel := ruri.Scheme
-	if len(channel) < 1 {
-		channel = "master"
-	}
 	host = &SshHost{
 		Name:    name,
 		URI:     suri,
-		Channel: channel,
+		Channel: ruri.Scheme,
 	}
 	if ruri.User != nil {
 		host.Username = ruri.User.Username()
@@ -298,6 +294,7 @@ func (s *SshSession) Close() (err error) {
 	if s.conn != nil {
 		s.conn.Close()
 	}
+	s.DisableCallback()
 	return
 }
 

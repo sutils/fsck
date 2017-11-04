@@ -24,3 +24,5 @@ coverage.json
 sctrl/sctrl-ssh
 
 sctrl/sctrl-scp
+
+sctrl/test/test.zip

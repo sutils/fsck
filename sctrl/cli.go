@@ -29,6 +29,7 @@ import (
 
 const (
 	KeyWebCmdURL = "_web_cmd_url"
+	WebCmdPrefix = "-sctrlweb:"
 )
 
 var SpaceRegex = regexp.MustCompile("[ ]+")
@@ -56,11 +57,12 @@ type Shell interface {
 }
 
 type Task struct {
-	ID     string
-	Subs   map[string]string
-	reader io.ReadCloser
-	writer io.WriteCloser
-	errc   int
+	ID       string
+	Subs     map[string]string
+	reader   io.ReadCloser
+	writer   io.WriteCloser
+	errc     int
+	Selected []string
 }
 
 func NewTask() *Task {
@@ -81,6 +83,11 @@ func (t *Task) Write(p []byte) (n int, err error) {
 }
 
 func (t *Task) Close() error {
+	if t.errc > 0 {
+		fmt.Fprintf(t, "%vhaving %v fair\n", WebCmdPrefix, t.errc)
+	} else {
+		fmt.Fprintf(t, "%vok\n", WebCmdPrefix)
+	}
 	t.reader.Close()
 	t.writer.Close()
 	return nil
@@ -116,9 +123,19 @@ type Terminal struct {
 	tasks   map[string]*Task
 	taskLck sync.RWMutex
 	profile *bytes.Buffer
+	//
+	keyin   chan []byte
+	keydone chan int
+	ctrlc   chan os.Signal
+	//
+	NotTaskCallback chan string
+
+	Resize bool
+	//
+	closed bool
 }
 
-func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string) *Terminal {
+func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, resize bool, buffered int) *Terminal {
 	term := &Terminal{
 		// ss:        map[string]*SshSession{},
 		ss:           list.New(),
@@ -127,7 +144,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string) *Terminal {
 		Mux:          http.NewServeMux(),
 		Cmd:          NewCmd("sctrl", ps1, shell),
 		Web:          NewWeb(nil),
-		Log:          NewWebLogger(name),
+		Log:          NewWebLogger(name, buffered),
 		WebCmd:       webcmd,
 		CmdPrefix:    "-sctrl: ",
 		callback:     make(chan []byte, 100),
@@ -138,13 +155,20 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string) *Terminal {
 		Forward:      fsck.NewForward(c),
 		stdout:       os.Stdout,
 		profile:      bytes.NewBuffer(nil),
+		//
+		keyin:   make(chan []byte, 10240),
+		keydone: make(chan int),
+		ctrlc:   make(chan os.Signal, 1),
+		Resize:  resize,
 	}
+	term.Cmd.Resize = resize
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
 	term.Mux.Handle("/exec", term.Web)
 	term.Mux.Handle("/log", term.Log)
 	prefix := bytes.NewBuffer(nil)
 	fmt.Fprintf(prefix, "set +o history\n")
+	fmt.Fprintf(prefix, "alias srun='%v/sctrl -run'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sexec='%v/sctrl -run sexec'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sadd='%v/sctrl -run sadd'\n", webcmd)
 	fmt.Fprintf(prefix, "alias srm='%v/sctrl -run srm'\n", webcmd)
@@ -253,12 +277,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 				fmt.Fprintf(buf, "-error: session %v not found, skipped\n", name)
 			}
 		}
-		bys := buf.Bytes()
-		if len(bys) > 0 {
-			data = bys
-		} else {
-			data = []byte("ok\n")
-		}
+		data = buf.Bytes()
 		return
 	case "sexec":
 		if len(cmds) < 2 {
@@ -266,8 +285,9 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			return
 		}
 		task := NewTask()
+		task.Selected = t.selected
 		data = task
-		go t.remoteExecf(task, nil, "%v\n_sexec_code=$?", cmds[1])
+		go t.remoteExecf(task, nil, "%v", cmds[1])
 		return
 	case "seval":
 		if len(cmds) < 2 {
@@ -276,22 +296,14 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		}
 		args := strings.TrimSpace(cmds[1])
 		var scriptPath, scriptArgs string
-		if strings.HasPrefix(args, "'") {
-			parts := strings.SplitN(args, "'", 2)
-			if len(parts) < 2 {
-				err = fmt.Errorf("%v having bash '", args)
-				return
-			}
-			scriptPath = strings.TrimPrefix(parts[0], "'")
-			scriptArgs = strings.TrimSpace(parts[1])
-		} else if strings.HasPrefix(args, "\"") {
-			parts := strings.SplitN(args, "\"", 2)
+		if strings.HasPrefix(args, "\"") {
+			parts := strings.SplitN(args, "\"", 3)
 			if len(parts) < 2 {
 				err = fmt.Errorf("%v having bash \"", args)
 				return
 			}
-			scriptPath = strings.TrimPrefix(parts[0], "\"")
-			scriptArgs = strings.TrimSpace(parts[1])
+			scriptPath = parts[1]
+			scriptArgs = strings.TrimSpace(parts[2])
 		} else {
 			parts := SpaceRegex.Split(args, 2)
 			scriptPath = parts[0]
@@ -305,8 +317,9 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			return
 		}
 		task := NewTask()
+		task.Selected = t.selected
 		data = task
-		go t.remoteExecf(task, scriptBytes, "%v\n_sexec_code=$?", scriptArgs)
+		go t.remoteExecf(task, scriptBytes, "%v", scriptArgs)
 		return
 	case "saddmap":
 		if len(cmds) < 2 {
@@ -365,23 +378,22 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	case "smaster":
 		var res util.Map
 		res, err = t.C.List()
-		if err != nil {
-			return
+		if err == nil {
+			buf := bytes.NewBuffer(nil)
+			slaver := res.MapVal("slaver")
+			fmt.Fprintf(buf, "Slaver:\n")
+			for name, status := range slaver {
+				fmt.Fprintf(buf, "  %10s   %v\n", name, status)
+			}
+			fmt.Fprintf(buf, "\n")
+			client := res.MapVal("client")
+			fmt.Fprintf(buf, "Client:\n")
+			for session, status := range client {
+				fmt.Fprintf(buf, "  %24s   %v\n", session, status)
+			}
+			fmt.Fprintf(buf, "\n")
+			data = buf.Bytes()
 		}
-		buf := bytes.NewBuffer(nil)
-		slaver := res.MapVal("slaver")
-		fmt.Fprintf(buf, "Slaver:\n")
-		for name, status := range slaver {
-			fmt.Fprintf(buf, "  %10s   %v\n", name, status)
-		}
-		fmt.Fprintf(buf, "\n")
-		client := res.MapVal("client")
-		fmt.Fprintf(buf, "Client:\n")
-		for session, status := range client {
-			fmt.Fprintf(buf, "  %24s   %v\n", session, status)
-		}
-		fmt.Fprintf(buf, "\n")
-		data = buf.Bytes()
 		return
 	case "shelp":
 		fallthrough
@@ -396,15 +408,14 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		var session *SshSession
 		var mapping *fsck.Mapping
 		session, mapping, err = t.checkHostForward(cmds[1])
-		if err != nil {
-			return
+		if err == nil {
+			suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.TrimPrefix(mapping.Local, ":"))
+			buf := bytes.NewBuffer(nil)
+			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: $args\"", session.Name, session.URI, suri)
+			fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v $sargs\n", session.Password, suri)
+			//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+			data = buf.Bytes()
 		}
-		suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.TrimPrefix(mapping.Local, ":"))
-		buf := bytes.NewBuffer(nil)
-		fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: $args\"", session.Name, session.URI, suri)
-		fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v $sargs\n", session.Password, suri)
-		//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
-		data = buf.Bytes()
 	case "wscp":
 		if len(cmds) < 2 {
 			err = fmt.Errorf("echo 'name is reqied' && exit 1")
@@ -442,24 +453,23 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		var session *SshSession
 		var mapping *fsck.Mapping
 		session, mapping, err = t.checkHostForward(name)
-		if err != nil {
-			return
+		if err == nil {
+			buf := bytes.NewBuffer(nil)
+			var suri string
+			if upload {
+				suri = fmt.Sprintf("%v@localhost:%v", session.Username, dst)
+				fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
+				fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
+					session.Password, strings.TrimPrefix(mapping.Local, ":"), src, suri)
+			} else {
+				suri = fmt.Sprintf("%v@localhost:%v", session.Username, src)
+				fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
+				fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
+					session.Password, strings.TrimPrefix(mapping.Local, ":"), suri, dst)
+			}
+			//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+			data = buf.Bytes()
 		}
-		buf := bytes.NewBuffer(nil)
-		var suri string
-		if upload {
-			suri = fmt.Sprintf("%v@localhost:%v", session.Username, dst)
-			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
-			fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
-				session.Password, strings.TrimPrefix(mapping.Local, ":"), src, suri)
-		} else {
-			suri = fmt.Sprintf("%v@localhost:%v", session.Username, src)
-			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
-			fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
-				session.Password, strings.TrimPrefix(mapping.Local, ":"), suri, dst)
-		}
-		//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
-		data = buf.Bytes()
 	case "profile":
 		buf := bytes.NewBuffer(nil)
 		for _, env := range t.Env {
@@ -534,16 +544,13 @@ func (t *Terminal) checkHostForward(name string) (session *SshSession, mapping *
 			Remote: muri,
 		}
 		_, err = t.Forward.Start(mapping)
-		if err != nil {
-			return
-		}
 	}
 	return
 }
 
 func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ...interface{}) {
 	cmds := fmt.Sprintf(format, args...)
-	log.Printf("remote execute->\n%v", cmds)
+	log.Printf("remote execute->%v", cmds)
 	t.taskLck.Lock()
 	t.slck.RLock()
 	defer func() {
@@ -559,30 +566,49 @@ func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ..
 	var execSession = func(session *SshSession, sid string) {
 		name := session.Name
 		var err error
-		tcmds := cmds
+		tcmds := bytes.NewBuffer(nil)
+		fmt.Fprintf(tcmds, "_sexec_sid=%v\n", sid)
 		if len(script) > 0 {
-			tcmds = "/tmp/sctrl-$_sexec_sid.sh " + cmds + "\nrm -f /tmp/sctrl-$_sexec_sid.sh"
-			err = session.UploadScript(fmt.Sprintf("/tmp/sctrl-%v.sh", sid), script, task)
+			spath := fmt.Sprintf("/tmp/sctrl-%v.sh", sid)
+			//
+			//prepare remote command list
+			fmt.Fprintf(tcmds, "/tmp/sctrl-$_sexec_sid.sh %v\n", cmds)
+			fmt.Fprintf(tcmds, "_sexec_code=$?\n")
+			fmt.Fprintf(tcmds, "rm -f /tmp/sctrl-$_sexec_sid.sh\n")
+			fmt.Fprintf(tcmds, "echo \"%v%v-$_sexec_code\"\n", t.CmdPrefix, sid)
+			//
+			fmt.Fprintf(task, "%v->start upload script to %v\n", name, spath)
+			err = session.UploadScript(spath, script, task)
 			if err != nil {
 				fmt.Fprintf(task, "%v->upload script to /tmp/sctrl-%v.sh fail with %v\n", name, sid, err)
+				task.errc++
 				return
 			}
+			//
+			fmt.Fprintf(task, "%v->exec %v %v\n", name, spath, cmds)
+		} else {
+			//
+			//prepare remote command list
+			fmt.Fprintf(tcmds, "%v\n", cmds)
+			fmt.Fprintf(tcmds, "_sexec_code=$?\n")
+			fmt.Fprintf(tcmds, "echo \"%v%v-$_sexec_code\"\n", t.CmdPrefix, sid)
+			//
+			fmt.Fprintf(task, "%v->exec %v\n", name, cmds)
 		}
-		//
-		//log.Printf("(%v) || echo '%v%v-$?'\n", cmds, t.CmdPrefix, sid)
-		_, err = fmt.Fprintf(session, "_sexec_sid=%v\n%v\necho \"%v%v-$_sexec_code\"\n", sid, tcmds, t.CmdPrefix, sid)
+		_, err = tcmds.WriteTo(session)
 		if err == nil {
 			task.Subs[sid] = name
 			fmt.Fprintf(task, "%v->start success\n", name)
 		} else {
 			fmt.Fprintf(task, "%v->start fail with %v\n", name, err)
+			task.errc++
 		}
 	}
 	task.ID = fmt.Sprintf("t%v", t.tidc)
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
 		name := session.Name
-		if len(t.selected) < 1 || Having(t.selected, name) {
+		if len(task.Selected) < 1 || Having(task.Selected, name) {
 			sid := fmt.Sprintf("%v-%v", task.ID, name)
 			execSession(session, sid)
 		}
@@ -612,6 +638,9 @@ func (t *Terminal) handleMessage(message string) {
 	}()
 	if task == nil {
 		log.Printf("the receive invalid call back %v, the task not found", message)
+		if t.NotTaskCallback != nil {
+			t.NotTaskCallback <- message
+		}
 		return
 	}
 	log.Printf("do task(%v) on message->%v", task.ID, message)
@@ -627,10 +656,11 @@ func (t *Terminal) handleMessage(message string) {
 		fmt.Fprintf(task, "-error: host not found on message:\n %v\n", message)
 		return
 	}
-	delete(task.Subs, sid)
 	if idcode[2] == "0" {
+		delete(task.Subs, sid)
 		fmt.Fprintf(task, "%v->done well: %v\n", host, back)
 	} else {
+		task.errc++
 		fmt.Fprintf(task, "%v->done error(%v): %v\n", host, idcode[2], back)
 	}
 }
@@ -640,7 +670,7 @@ func (t *Terminal) handleCallback() {
 		select {
 		case back := <-t.callback:
 			message := string(back)
-			if strings.Contains(message, "-$") { //call back message
+			if strings.Contains(message, "$") { //call back message
 				break
 			}
 			t.handleMessage(message)
@@ -683,51 +713,51 @@ func (t *Terminal) Activate(shell Shell) {
 	}
 }
 
-func (t *Terminal) Switch(name string) (switched bool) {
-	if len(name) > 0 {
-		if name == t.Cmd.Name {
-			switched = true
-			t.Activate(t.Cmd)
-			return
-		}
-		for em := t.ss.Front(); em != nil; em = em.Next() {
-			session := em.Value.(*SshSession)
-			if session.Name == name {
-				switched = true
-				t.Activate(session)
-				return
-			}
-		}
-		fmt.Printf("\nsession %v not found", name)
-		t.activited.Write([]byte("\n"))
-		return
-	}
-	if t.activited != t.Cmd {
-		switched = true
-		t.Activate(t.Cmd)
-		return
-	}
-	if len(t.last) > 0 {
-		for em := t.ss.Front(); em != nil; em = em.Next() {
-			session := em.Value.(*SshSession)
-			if session.Name == t.last {
-				switched = true
-				t.Activate(session)
-				return
-			}
-		}
-	}
-	em := t.ss.Front()
-	if em == nil {
-		fmt.Print("\nnot running session found")
-		t.activited.Write([]byte("\n"))
-		return
-	}
-	session := em.Value.(*SshSession)
-	switched = true
-	t.Activate(session)
-	return
-}
+// func (t *Terminal) Switch(name string) (switched bool) {
+// 	if len(name) > 0 {
+// 		if name == t.Cmd.Name {
+// 			switched = true
+// 			t.Activate(t.Cmd)
+// 			return
+// 		}
+// 		for em := t.ss.Front(); em != nil; em = em.Next() {
+// 			session := em.Value.(*SshSession)
+// 			if session.Name == name {
+// 				switched = true
+// 				t.Activate(session)
+// 				return
+// 			}
+// 		}
+// 		fmt.Printf("\nsession %v not found", name)
+// 		t.activited.Write([]byte("\n"))
+// 		return
+// 	}
+// 	if t.activited != t.Cmd {
+// 		switched = true
+// 		t.Activate(t.Cmd)
+// 		return
+// 	}
+// 	if len(t.last) > 0 {
+// 		for em := t.ss.Front(); em != nil; em = em.Next() {
+// 			session := em.Value.(*SshSession)
+// 			if session.Name == t.last {
+// 				switched = true
+// 				t.Activate(session)
+// 				return
+// 			}
+// 		}
+// 	}
+// 	em := t.ss.Front()
+// 	if em == nil {
+// 		fmt.Print("\nnot running session found")
+// 		t.activited.Write([]byte("\n"))
+// 		return
+// 	}
+// 	session := em.Value.(*SshSession)
+// 	switched = true
+// 	t.Activate(session)
+// 	return
+// }
 
 func (t *Terminal) IdxSwitch(idx int) (switched bool) {
 	if idx == 0 {
@@ -737,10 +767,9 @@ func (t *Terminal) IdxSwitch(idx int) (switched bool) {
 	}
 	em := t.ss.Front()
 	for i := 1; i < idx; i++ {
-		if em == nil {
-			break
+		if em != nil {
+			em = em.Next()
 		}
-		em = em.Next()
 	}
 	if em == nil {
 		fmt.Printf("\nsession idx(%v) not found", idx)
@@ -768,6 +797,7 @@ func (t *Terminal) AddSession(name, uri string, connect bool, env map[string]int
 		host.Name, host.Channel, host.URI, host.Username, host.Password)
 	session := NewSshSession(t.C, host)
 	session.PreEnv = t.Env
+	session.Resize = t.Resize
 	session.EnableCallback([]byte(t.CmdPrefix), t.callback)
 	session.Add(NewNamedWriter(name, t.Log))
 	if connect {
@@ -833,7 +863,7 @@ func (t *Terminal) SaveConf() {
 	//log.Printf("save instance info to %v success", t.InstancePath)
 }
 
-func (t *Terminal) Proc(conf *WorkConf) (err error) {
+func (t *Terminal) Start(conf *WorkConf) (err error) {
 	//initial
 	t.WebSrv.Start()
 	log.Printf("listen web on %v", t.WebSrv.URL)
@@ -869,7 +899,7 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 		}
 	}
 	//
-	t.Switch(t.Cmd.Name)
+	t.IdxSwitch(0)
 	//
 	t.running = true
 	go func() {
@@ -882,24 +912,21 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 		}
 	}()
 	//
-	keyin := make(chan []byte, 10240)
-	keydone := make(chan int)
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
 	go func() {
 		var key []byte
 		var escc int
 		var ctrc int
 		for t.running {
 			select {
-			case key = <-keyin:
-			case <-quit:
+			case key = <-t.keyin:
+			case <-t.ctrlc:
 				continue
 			}
 			if bytes.Equal(key, CharTerm) {
 				ctrc++
 				if ctrc > 3 {
 					t.CloseExit()
+					continue
 				}
 			} else {
 				ctrc = 0
@@ -908,6 +935,7 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 				escc++
 				if escc > 2 {
 					t.CloseExit()
+					continue
 				}
 			} else {
 				escc = 0
@@ -939,36 +967,64 @@ func (t *Terminal) Proc(conf *WorkConf) (err error) {
 					fmt.Printf("%v session fail with %v\n", t.activited, err)
 				}
 			}
-			keydone <- 1
+			t.keydone <- 1
 		}
 	}()
+	return
+}
+
+func (t *Terminal) ProcReadkey() {
 	//wait for cosole ready.
 	time.Sleep(500 * time.Millisecond)
+	signal.Notify(t.ctrlc, os.Interrupt)
 	readkey.Open()
 	for t.running {
 		key, err := readkey.Read()
 		if err != nil {
 			break
 		}
-		keyin <- key
+		t.keyin <- key
 		select {
-		case <-keydone:
+		case <-t.keydone:
 		case <-time.After(8 * time.Second):
 			fmt.Printf("%v operationg timeout\n", t.activited)
 			t.CloseExit()
 		}
 	}
+}
+
+func (t *Terminal) Write(p []byte) (n int, err error) {
+	t.keyin <- p
+	select {
+	case <-t.keydone:
+		n = len(p)
+	case <-time.After(8 * time.Second):
+		err = fmt.Errorf("%v operationg timeout", t.activited)
+	}
 	return
 }
 
 func (t *Terminal) Close() (err error) {
+	if t.closed {
+		return
+	}
+	t.closed = true
 	fmt.Printf("clean all...\n")
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
 		session.Close()
 	}
 	t.ss = list.New()
+	fmt.Printf("closing all channel...\n")
 	t.C.Close()
+	fmt.Printf("closing sctrl console...\n")
+	t.Cmd.Close()
+	fmt.Printf("closing local log server...\n")
+	t.Log.Close()
+	fmt.Printf("closing local web server...\n")
+	t.WebSrv.Close()
+	fmt.Printf("closing forward channel server...\n")
+	t.Forward.Close()
 	readkey.Close()
 	t.running = false
 	fmt.Printf("clean done...\n")
@@ -978,5 +1034,5 @@ func (t *Terminal) Close() (err error) {
 func (t *Terminal) CloseExit() {
 	fmt.Println()
 	t.Close()
-	os.Exit(0)
+	exitf(0)
 }

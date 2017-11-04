@@ -152,6 +152,14 @@ func (f *Forward) List() (ms []*Mapping) {
 	return
 }
 
+func (f *Forward) Close() error {
+	ms := f.List()
+	for _, m := range ms {
+		f.Stop(m.Name, true)
+	}
+	return nil
+}
+
 func NewLocalListener(addr string) (l net.Listener, err error) {
 	if len(addr) > 0 {
 		l, err = net.Listen("tcp", addr)
