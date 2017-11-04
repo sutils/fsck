@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -157,6 +160,7 @@ type SshSession struct {
 	stdin   io.Writer
 	Prefix  io.Reader
 	PreEnv  []string
+	Resize  bool
 }
 
 func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
@@ -165,6 +169,7 @@ func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
 		C:           c,
 		out:         NewOutWriter(),
 		MultiWriter: NewMultiWriter(),
+		Resize:      true,
 	}
 	ss.MultiWriter.Add(ss.out)
 	return ss
@@ -224,7 +229,10 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	if len(pty) < 1 {
 		pty = "vt100"
 	}
-	w, h := readkey.GetSize()
+	var w, h int = 80, 60
+	if s.Resize {
+		w, h = readkey.GetSize()
+	}
 	err = s.session.RequestPty(pty, h, w, modes)
 	if err != nil {
 		return
@@ -290,5 +298,59 @@ func (s *SshSession) Close() (err error) {
 	if s.conn != nil {
 		s.conn.Close()
 	}
+	return
+}
+
+func (s *SshSession) Upload(dir, name string, length int64, mode os.FileMode, reader io.Reader, out io.Writer) (err error) {
+	if s.client == nil {
+		err = s.Start()
+		if err != nil {
+			return
+		}
+	}
+	session, err := s.client.NewSession()
+	if err != nil {
+		return
+	}
+	session.Stdout = out
+	session.Stderr = out
+	stdin, _ := session.StdinPipe()
+	quit := make(chan int)
+	go func() {
+		err = session.Run("scp -tr " + dir)
+		quit <- 0
+	}()
+	m := fmt.Sprintf("C0%o", mode)
+	_, err = fmt.Fprintln(stdin, m, length, name)
+	if err != nil {
+		return
+	}
+	_, err = io.Copy(stdin, reader)
+	if err != nil {
+		return
+	}
+	fmt.Fprint(stdin, "\x00")
+	stdin.Close()
+	<-quit
+	return
+}
+
+func (s *SshSession) UploadFile(path, dir string, out io.Writer) (err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return
+	}
+	err = s.Upload(dir, info.Name(), info.Size(), info.Mode(), file, out)
+	return
+}
+
+func (s *SshSession) UploadScript(path string, script []byte, out io.Writer) (err error) {
+	dir, name := filepath.Split(path)
+	err = s.Upload(dir, name, int64(len(script)), os.FileMode(0755), bytes.NewBuffer(script), out)
 	return
 }

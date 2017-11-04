@@ -118,7 +118,7 @@ type Terminal struct {
 	profile *bytes.Buffer
 }
 
-func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
+func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string) *Terminal {
 	term := &Terminal{
 		// ss:        map[string]*SshSession{},
 		ss:           list.New(),
@@ -127,14 +127,14 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 		Mux:          http.NewServeMux(),
 		Cmd:          NewCmd("sctrl", ps1, shell),
 		Web:          NewWeb(nil),
-		Log:          NewWebLogger(),
+		Log:          NewWebLogger(name),
 		WebCmd:       webcmd,
 		CmdPrefix:    "-sctrl: ",
 		callback:     make(chan []byte, 100),
 		tasks:        map[string]*Task{},
 		taskLck:      sync.RWMutex{},
 		InstancePath: "/tmp/.sctrl_instance.json",
-		Name:         "Sctrl",
+		Name:         name,
 		Forward:      fsck.NewForward(c),
 		stdout:       os.Stdout,
 		profile:      bytes.NewBuffer(nil),
@@ -145,7 +145,7 @@ func NewTerminal(c *fsck.Slaver, ps1, shell, webcmd string) *Terminal {
 	term.Mux.Handle("/log", term.Log)
 	prefix := bytes.NewBuffer(nil)
 	fmt.Fprintf(prefix, "set +o history\n")
-	fmt.Fprintf(prefix, "alias sexec='%v/sctrl -run'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sexec='%v/sctrl -run sexec'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sadd='%v/sctrl -run sadd'\n", webcmd)
 	fmt.Fprintf(prefix, "alias srm='%v/sctrl -run srm'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sall='%v/sctrl -run sall'\n", webcmd)
@@ -267,7 +267,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		}
 		task := NewTask()
 		data = task
-		go t.remoteExecf(task, "%v\n_sexec_code=$?\n", cmds[1])
+		go t.remoteExecf(task, nil, "%v\n_sexec_code=$?", cmds[1])
 		return
 	case "seval":
 		if len(cmds) < 2 {
@@ -304,16 +304,9 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		if err != nil {
 			return
 		}
-		var shell = bytes.NewBuffer(nil)
-		fmt.Fprintf(shell, "cat >/tmp/sctrl-%v.sh <<EOF\n", "$_sexec_sid")
-		shell.Write(scriptBytes)
-		fmt.Fprintf(shell, "\nEOF\n")
-		fmt.Fprintf(shell, "bash -e /tmp/sctrl-%v.sh %v\n", "$_sexec_sid", scriptArgs)
-		fmt.Fprintf(shell, "_sexec_code=$?\n")
-		fmt.Fprintf(shell, "rm -f /tmp/sctrl-%v.sh\n", "$_sexec_sid")
 		task := NewTask()
 		data = task
-		go t.remoteExecf(task, string(shell.Bytes()))
+		go t.remoteExecf(task, scriptBytes, "%v\n_sexec_code=$?", scriptArgs)
 		return
 	case "saddmap":
 		if len(cmds) < 2 {
@@ -548,7 +541,7 @@ func (t *Terminal) checkHostForward(name string) (session *SshSession, mapping *
 	return
 }
 
-func (t *Terminal) remoteExecf(task *Task, format string, args ...interface{}) {
+func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ...interface{}) {
 	cmds := fmt.Sprintf(format, args...)
 	log.Printf("remote execute->\n%v", cmds)
 	t.taskLck.Lock()
@@ -563,20 +556,35 @@ func (t *Terminal) remoteExecf(task *Task, format string, args ...interface{}) {
 		return
 	}
 	t.tidc++
+	var execSession = func(session *SshSession, sid string) {
+		name := session.Name
+		var err error
+		tcmds := cmds
+		if len(script) > 0 {
+			tcmds = "/tmp/sctrl-$_sexec_sid.sh " + cmds + "\nrm -f /tmp/sctrl-$_sexec_sid.sh"
+			err = session.UploadScript(fmt.Sprintf("/tmp/sctrl-%v.sh", sid), script, task)
+			if err != nil {
+				fmt.Fprintf(task, "%v->upload script to /tmp/sctrl-%v.sh fail with %v\n", name, sid, err)
+				return
+			}
+		}
+		//
+		//log.Printf("(%v) || echo '%v%v-$?'\n", cmds, t.CmdPrefix, sid)
+		_, err = fmt.Fprintf(session, "_sexec_sid=%v\n%v\necho \"%v%v-$_sexec_code\"\n", sid, tcmds, t.CmdPrefix, sid)
+		if err == nil {
+			task.Subs[sid] = name
+			fmt.Fprintf(task, "%v->start success\n", name)
+		} else {
+			fmt.Fprintf(task, "%v->start fail with %v\n", name, err)
+		}
+	}
 	task.ID = fmt.Sprintf("t%v", t.tidc)
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
 		name := session.Name
 		if len(t.selected) < 1 || Having(t.selected, name) {
 			sid := fmt.Sprintf("%v-%v", task.ID, name)
-			//log.Printf("(%v) || echo '%v%v-$?'\n", cmds, t.CmdPrefix, sid)
-			_, err := fmt.Fprintf(session, "_sexec_sid=%v\n%v\necho \"%v%v-$_sexec_code\"\n", sid, cmds, t.CmdPrefix, sid)
-			if err == nil {
-				task.Subs[sid] = name
-				fmt.Fprintf(task, "%v->start success\n", name)
-			} else {
-				fmt.Fprintf(task, "%v->start fail with %v\n", name, err)
-			}
+			execSession(session, sid)
 		}
 	}
 	if len(task.Subs) < 1 {

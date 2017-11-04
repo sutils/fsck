@@ -95,13 +95,15 @@ func (w *WebLogWriter) Write(p []byte) (n int, err error) {
 }
 
 type WebLogger struct {
+	Name  string
 	allws map[string]*WebLogWriter
 	wslck sync.RWMutex
 	all   io.Writer
 }
 
-func NewWebLogger() *WebLogger {
+func NewWebLogger(name string) *WebLogger {
 	return &WebLogger{
+		Name:  name,
 		allws: map[string]*WebLogWriter{},
 		wslck: sync.RWMutex{},
 	}
@@ -119,11 +121,11 @@ func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	wwriter := NewWaitWriter(NewNoBufferResponseWriter(resp))
 	buf := bytes.NewBuffer(nil)
 	w.wslck.RLock()
-	fmt.Fprintf(buf, "->web logger name:\n")
+	fmt.Fprintf(buf, "%v->web logger name:\n", w.Name)
 	for name := range w.allws {
 		fmt.Fprintf(buf, "  %v\n", name)
 	}
-	fmt.Fprintf(buf, "->web logger is started by %v\n", ns)
+	fmt.Fprintf(buf, "%v->web logger is started by %v\n", w.Name, ns)
 	w.wslck.RUnlock()
 	buf.WriteTo(wwriter)
 	if ns == "all" {

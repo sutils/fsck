@@ -579,8 +579,7 @@ func sctrlClient() {
 	exepath, _ := os.Executable()
 	exepath, _ = filepath.Abs(exepath)
 	webcmd, _ := filepath.Split(exepath)
-	terminal := NewTerminal(client, ps1, bash, webcmd)
-	terminal.Name = name
+	terminal := NewTerminal(client, name, ps1, bash, webcmd)
 	terminal.InstancePath = instancePath
 	for key, val := range conf.Env {
 		terminal.Env = append(terminal.Env, fmt.Sprintf("%v=%v", key, val))
@@ -750,11 +749,6 @@ func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url s
 			err = fmt.Errorf("not running instance")
 			return
 		}
-		if len(confList) == 1 {
-			//only one
-			oneconf = confList[0]
-			break
-		}
 		if len(last) > 0 {
 			//the pwd is specified
 			for _, conf := range confList {
@@ -777,6 +771,11 @@ func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url s
 			}
 			err = fmt.Errorf("not instance for pwd(%v)", last)
 			return
+		}
+		if len(confList) == 1 {
+			//only one
+			oneconf = confList[0]
+			break
 		}
 		if signle {
 			err = fmt.Errorf("more than one instance found, please pick one by export SCTRL_INSTANCE")
