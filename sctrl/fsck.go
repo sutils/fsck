@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -649,24 +650,168 @@ func execCmds(cmds string, log, wait, single bool) (code int, err error) {
 	return
 }
 
-func sctrlLogCli(name ...string) {
+func sctrlRawLogCli(name ...string) {
 	var url, last string
 	var err error
 	delay := 5 * time.Second
+	ns := strings.Join(name, ",")
+	logw := NewWebLogPrinter(os.Stdout)
 	for {
 		url, last, err = findWebURL(last, true, true, false, delay)
 		if err != nil { //having error.
 			fmt.Println(err)
 			exitf(1)
 		}
-		name := strings.Join(name, ",")
-		_, err := ExecWebLog(url+"/log", name, os.Stdout)
+		_, err := ExecWebLog(url+"/log", ns, "1", logw)
 		if err != nil && reflect.TypeOf(err).String() == "*url.Error" && len(last) > 0 {
 			fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
 		} else {
-			fmt.Printf("->reply error:%v\n", err)
+			fmt.Printf("->reply error(%v):%v\n", reflect.TypeOf(err), err)
 		}
 		time.Sleep(delay)
+	}
+}
+
+func sctrlLogCli(name ...string) {
+	var url, last string
+	var err error
+	delay := 5 * time.Second
+	ns := strings.Join(name, ",")
+	logw := NewWebLogPrinter(os.Stdout)
+	url, last, _ = findWebURL(last, true, true, false, delay)
+	//
+	pre := "1"
+	done := make(chan int)
+	switching := false
+	var runlog = func() {
+		fmt.Printf("\n\n------------------ %v ------------------\n", ns)
+		for !switching {
+			url, last, err = findWebURL(last, true, true, false, delay)
+			if err != nil { //having error.
+				fmt.Println(err)
+				exitf(1)
+			}
+			_, err := ExecWebLog(url+"/log", ns, pre, logw)
+			if switching {
+				continue
+			}
+			if err != nil && reflect.TypeOf(err).String() == "*url.Error" && len(last) > 0 {
+				fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
+			} else {
+				fmt.Printf("->reply error(%v):%v\n", reflect.TypeOf(err), err)
+			}
+			time.Sleep(delay)
+		}
+		pre = "0"
+		done <- 1
+	}
+	go runlog()
+	var buf []byte
+	var idxSwitch = func(idx int) {
+		fmt.Printf("\nWaiting log %v stop...\n", ns)
+		switching = true
+		old := logw
+		logw = NewWebLogPrinter(os.Stdout)
+		old.Close()
+		var bys []byte
+		resp, err := http.Get(url + "/lslog")
+		if err == nil {
+			bys, err = ioutil.ReadAll(resp.Body)
+		}
+		<-done
+		if err != nil {
+			fmt.Printf("list log name fail with %v\n", err)
+			return
+		}
+		fmt.Printf("\nSupported:\n")
+		os.Stdout.Write(bys)
+		rawns := SpaceRegex.Split(string(bys), -1)
+		allns := []string{}
+		for _, n := range rawns {
+			if len(n) < 1 {
+				continue
+			}
+			allns = append(allns, n)
+		}
+		if idx >= len(allns) {
+			fmt.Printf("\n->switch fail with index out of bound by %v, rollback to %v\n", idx, ns)
+			time.Sleep(2 * time.Second)
+		} else {
+			ns = allns[idx]
+		}
+		switching = false
+		go runlog()
+	}
+	readkey.Open()
+	for {
+		key, err := readkey.Read()
+		if err != nil || bytes.Equal(key, CharTerm) {
+			fmt.Println()
+			break
+		}
+		if key[0] == 127 { //delete
+			if len(buf) > 0 {
+				buf = buf[0 : len(buf)-1]
+				os.Stdout.WriteString("\b \b")
+			}
+			continue
+		}
+		switch {
+		case bytes.Equal(key, KeyF1):
+			idxSwitch(0)
+		case bytes.Equal(key, KeyF2):
+			idxSwitch(1)
+		case bytes.Equal(key, KeyF3):
+			idxSwitch(2)
+		case bytes.Equal(key, KeyF4):
+			idxSwitch(3)
+		case bytes.Equal(key, KeyF5):
+			idxSwitch(4)
+		case bytes.Equal(key, KeyF6):
+			idxSwitch(5)
+		case bytes.Equal(key, KeyF7):
+			idxSwitch(6)
+		case bytes.Equal(key, KeyF8):
+			idxSwitch(7)
+		case bytes.Equal(key, KeyF9):
+			idxSwitch(8)
+		case bytes.Equal(key, KeyF10):
+			idxSwitch(9)
+		default:
+			if key[0] != '\r' {
+				buf = append(buf, key...)
+				os.Stdout.Write(key)
+				continue
+			}
+			if switching {
+				if len(buf) < 1 {
+					fmt.Printf("\nPlease entry log name:")
+					continue
+				}
+				ns = strings.TrimSpace(string(buf))
+				switching = false
+				go runlog()
+				buf = nil
+			} else {
+				fmt.Printf("\nWaiting log %v stop...\n", ns)
+				switching = true
+				old := logw
+				logw = NewWebLogPrinter(os.Stdout)
+				old.Close()
+				resp, err := http.Get(url + "/lslog")
+				<-done
+				if err != nil {
+					fmt.Printf("list log name fail with %v\n", err)
+				} else {
+					fmt.Printf("\nSupported:\n")
+					io.Copy(os.Stdout, resp.Body)
+					resp.Body.Close()
+					fmt.Println()
+				}
+				fmt.Printf("\nPlease entry log name:")
+				buf = nil
+			}
+		}
 	}
 	exitf(0)
 }

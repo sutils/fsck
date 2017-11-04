@@ -81,11 +81,11 @@ func NewWebLogWriter(buffered int) *WebLogWriter {
 	}
 }
 
-func (w *WebLogWriter) Add(writer io.Writer) {
+func (w *WebLogWriter) Add(writer io.Writer, pre bool) {
 	w.lck.Lock()
 	w.MultiWriter.Add(writer)
 	buf := w.Buf.Bytes()
-	if len(buf) > 0 {
+	if len(buf) > 0 && pre {
 		writer.Write(buf)
 	}
 	w.lck.Unlock()
@@ -107,6 +107,7 @@ type WebLogger struct {
 	all      io.WriteCloser
 	Buffered int
 	allreq   map[string]*WaitWriter
+	LsName   func() []string
 }
 
 func NewWebLogger(name string, buffered int) *WebLogger {
@@ -118,10 +119,39 @@ func NewWebLogger(name string, buffered int) *WebLogger {
 		allreq:   map[string]*WaitWriter{},
 	}
 }
+func (w *WebLogger) ListLogH(resp http.ResponseWriter, req *http.Request) {
+	max := make([]int, 5)
+	ns := []string{}
+	if w.LsName != nil {
+		ns = w.LsName()
+	}
+	if len(ns) < 1 {
+		w.wslck.RLock()
+		for n := range w.allws {
+			ns = append(ns, n)
+		}
+		w.wslck.RUnlock()
+	}
+	for idx, n := range ns {
+		idx = idx % 5
+		if max[idx] < len(n) {
+			max[idx] = len(n)
+		}
+	}
+	buf := bytes.NewBuffer(nil)
+	for idx, n := range ns {
+		fmt.Fprintf(buf, fmt.Sprintf(" %%%vs  ", max[idx%5]), n)
+		if idx > 0 && idx%5 == 0 {
+			fmt.Fprintln(buf)
+		}
+	}
+	buf.WriteTo(resp)
+}
 
-func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+func (w *WebLogger) WebLogH(resp http.ResponseWriter, req *http.Request) {
 	req.ParseForm()
 	ns := req.FormValue("name")
+	pre := req.FormValue("pre")
 	resp.Header().Add("Content-Type", "text/plain;charset=utf8")
 	if len(ns) < 1 {
 		fmt.Fprintf(resp, "name parameter is required\n")
@@ -154,7 +184,7 @@ func (w *WebLogger) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			if ws == nil {
 				ws = NewWebLogWriter(w.Buffered)
 			}
-			ws.Add(wwriter)
+			ws.Add(wwriter, pre == "1")
 			used = append(used, ws)
 			w.allws[name] = ws
 		}
@@ -193,4 +223,25 @@ func (w *WebLogger) Close() error {
 	}
 	w.wslck.Unlock()
 	return nil
+}
+
+type WebLogPrinter struct {
+	Out    io.Writer
+	Reader io.ReadCloser
+}
+
+func NewWebLogPrinter(out io.Writer) *WebLogPrinter {
+	return &WebLogPrinter{Out: out}
+}
+
+func (w *WebLogPrinter) Write(p []byte) (n int, err error) {
+	n, err = w.Out.Write(p)
+	return
+}
+
+func (w *WebLogPrinter) Close() (err error) {
+	if w.Reader != nil {
+		err = w.Reader.Close()
+	}
+	return
 }

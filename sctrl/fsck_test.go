@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"testing"
@@ -89,10 +90,10 @@ func TestMain(t *testing.T) {
 	}()
 	time.Sleep(500 * time.Millisecond)
 	go func() {
-		sctrlLogCli("debug")
+		sctrlRawLogCli("debug")
 	}()
 	go func() {
-		sctrlLogCli("all")
+		sctrlRawLogCli("all")
 	}()
 	time.Sleep(100 * time.Millisecond)
 	//
@@ -316,6 +317,17 @@ func TestMain(t *testing.T) {
 		bys, err = exec.Command("curl", "-o", "/tmp/testa.zip", "http://localhost:9235/dav/test.zip").Output()
 		if err != nil {
 			fmt.Println(string(bys))
+			t.Error(err)
+			return
+		}
+	}
+	{
+		fmt.Println("testing list log---->")
+		resp, err := http.Get(terminal.WebSrv.URL + "/lslog")
+		if err == nil {
+			_, err = ioutil.ReadAll(resp.Body)
+		}
+		if err != nil {
 			t.Error(err)
 			return
 		}

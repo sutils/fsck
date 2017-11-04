@@ -32,7 +32,7 @@ const (
 	WebCmdPrefix = "-sctrlweb:"
 )
 
-var SpaceRegex = regexp.MustCompile("[ ]+")
+var SpaceRegex = regexp.MustCompile("[ \n]+")
 var CharTerm = []byte{3}
 var CharESC = []byte{27}
 
@@ -165,7 +165,8 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, resize bool, b
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
 	term.Mux.Handle("/exec", term.Web)
-	term.Mux.Handle("/log", term.Log)
+	term.Mux.HandleFunc("/log", term.Log.WebLogH)
+	term.Mux.HandleFunc("/lslog", term.Log.ListLogH)
 	prefix := bytes.NewBuffer(nil)
 	fmt.Fprintf(prefix, "set +o history\n")
 	fmt.Fprintf(prefix, "alias srun='%v/sctrl -run'\n", webcmd)
@@ -185,8 +186,18 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, resize bool, b
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
+	term.Log.LsName = term.ListLogName
 	return term
 }
+
+func (t *Terminal) ListLogName() (ns []string) {
+	for em := t.ss.Front(); em != nil; em = em.Next() {
+		ns = append(ns, em.Value.(*SshSession).Name)
+	}
+	ns = append(ns, "debug", "sctrl")
+	return
+}
+
 func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	line = strings.TrimSpace(line)
 	log.Printf("Terminal exec command:%v", line)

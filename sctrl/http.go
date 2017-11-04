@@ -105,13 +105,15 @@ func ExecWebCmd(url string, cmds string, out io.Writer) (code int, err error) {
 	return
 }
 
-func ExecWebLog(url string, ns string, out io.Writer) (code int, err error) {
-	resp, err := http.Get(url + "?name=" + ns)
+func ExecWebLog(url string, ns string, pre string, out *WebLogPrinter) (code int, err error) {
+	resp, err := http.Get(url + "?name=" + ns + "&pre=" + pre)
 	if err != nil {
 		code = -1
 		return
 	}
-	_, err = io.Copy(out, resp.Body)
+	defer resp.Body.Close()
+	out.Reader = resp.Body
+	_, err = io.Copy(out, out.Reader)
 	if err != nil {
 		code = resp.StatusCode
 	}
