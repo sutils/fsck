@@ -495,8 +495,9 @@ func sctrlServer() {
 	if err != nil {
 		fmt.Println(err)
 		exitf(1)
+	} else {
+		exitf(0)
 	}
-	fmt.Println(err)
 }
 
 func sctrlSlaver() {
@@ -508,6 +509,7 @@ func sctrlSlaver() {
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
 	wait := make(chan int)
 	<-wait
+	exitf(0)
 }
 
 var terminal *Terminal
@@ -615,6 +617,7 @@ func sctrlClient() {
 	terminal.Start(conf)
 	if input == nil {
 		terminal.ProcReadkey()
+		exitf(0)
 		return
 	}
 	for key := range input {
@@ -623,6 +626,7 @@ func sctrlClient() {
 		}
 		terminal.Write(key)
 	}
+	exitf(0)
 }
 
 func sctrlExec(cmds string) {
@@ -664,6 +668,7 @@ func sctrlLogCli(name ...string) {
 		}
 		time.Sleep(delay)
 	}
+	exitf(0)
 }
 
 func sctrlWebdav() {
