@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -39,8 +40,51 @@ func runEchoServer() {
 	}
 }
 
+func RKClose(n string) {
+
+}
+
+func RKOpen(n string) {
+
+}
+
+var rkinputCli = make(chan []byte)
+var rkinputLog = make(chan []byte)
+var rkinputLogin = make(chan []byte, 10)
+var rkinputDefault = make(chan []byte)
+
+func RKRead(n string) (key []byte, err error) {
+	switch n {
+	case "cli":
+		key = <-rkinputCli
+	case "log":
+		key = <-rkinputLog
+	case "login":
+		key = <-rkinputLogin
+	default:
+		key = <-rkinputDefault
+	}
+	if key == nil {
+		err = io.EOF
+	}
+	return
+}
+
+func RKGetSieze() (w, h int) {
+	return 80, 60
+}
+
+func RKSetSize(fd uintptr, w, h int) (err error) {
+	return
+}
+
 func init() {
 	go runEchoServer()
+	readkeyClose = RKClose
+	readkeyGetSize = RKGetSieze
+	readkeyOpen = RKOpen
+	readkeyRead = RKRead
+	readkeySetSize = RKSetSize
 }
 
 var notZeroExit = func(code int) {
@@ -63,6 +107,10 @@ func TestMain(t *testing.T) {
 		t.Error(err)
 		return
 	}
+	go func() {
+		sctrlLogCli("all")
+	}()
+	time.Sleep(2 * time.Second)
 	// os.Setenv("SCTRL_INSTANCE", "value string")
 	go func() {
 		tokenList.Set("abc")
@@ -81,26 +129,62 @@ func TestMain(t *testing.T) {
 		sctrlSlaver()
 	}()
 	time.Sleep(100 * time.Millisecond)
-	input = make(chan []byte)
 	go func() {
 		webcmd, _ = os.Getwd()
-		loginToken = "abc"
 		wsconf = "test/.sctrl.json"
+		rkinputLogin <- []byte("abc")
+		rkinputLogin <- []byte{127}
+		rkinputLogin <- []byte("c")
+		rkinputLogin <- []byte("\r")
 		sctrlClient()
 	}()
 	time.Sleep(500 * time.Millisecond)
-	go func() {
-		sctrlRawLogCli("debug")
-	}()
-	go func() {
-		sctrlRawLogCli("all")
-	}()
-	time.Sleep(100 * time.Millisecond)
 	//
 	back := make(chan string)
 	terminal.NotTaskCallback = back
 	var writekey = func(format string, args ...interface{}) {
-		input <- []byte(fmt.Sprintf("%v\necho %v$?\n", fmt.Sprintf(format, args...), terminal.CmdPrefix))
+		rkinputCli <- []byte(fmt.Sprintf("%v\necho %v$?\n", fmt.Sprintf(format, args...), terminal.CmdPrefix))
+	}
+	//
+	{ //test log cli
+		//
+		fmt.Println("test log cli by name--->")
+		rkinputLog <- []byte{'\r'}
+		time.Sleep(time.Second)
+		rkinputLog <- []byte{'\r'}
+		time.Sleep(time.Second)
+		rkinputLog <- []byte("all")
+		time.Sleep(500 * time.Millisecond)
+		rkinputLog <- []byte{127}
+		time.Sleep(1000 * time.Millisecond)
+		rkinputLog <- []byte{'l'}
+		time.Sleep(1000 * time.Millisecond)
+		rkinputLog <- []byte{'\r'}
+		time.Sleep(1 * time.Second)
+
+		//
+		fmt.Println("test log cli by index--->")
+		rkinputLog <- KeyF10
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF9
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF8
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF7
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF6
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF5
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF4
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF3
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF2
+		time.Sleep(time.Second)
+		rkinputLog <- KeyF1
+		time.Sleep(time.Second)
+
 	}
 	//
 	writekey("shelp")
@@ -334,7 +418,7 @@ func TestMain(t *testing.T) {
 	}
 	{
 		fmt.Println("testing switch---->")
-		input <- KeyF1
+		rkinputCli <- KeyF1
 		writekey("sadd loc2 root:sco@loc.m")
 		if m := <-back; m != "0" {
 			t.Error(m)
@@ -350,25 +434,25 @@ func TestMain(t *testing.T) {
 			t.Error(m)
 			return
 		}
-		input <- KeyF2
+		rkinputCli <- KeyF2
 		writekey("echo abc")
 		if m := <-back; m != "0" {
 			t.Error(m)
 			return
 		}
-		input <- KeyF3
+		rkinputCli <- KeyF3
 		writekey("echo abc")
 		if m := <-back; m != "0" {
 			t.Error(m)
 			return
 		}
-		input <- KeyF4
+		rkinputCli <- KeyF4
 		writekey("echo abc")
 		if m := <-back; m != "0" {
 			t.Error(m)
 			return
 		}
-		input <- KeyF5
+		rkinputCli <- KeyF5
 		writekey("echo abc")
 		if m := <-back; m != "0" {
 			t.Error(m)
@@ -376,21 +460,21 @@ func TestMain(t *testing.T) {
 		}
 		//
 		//
-		input <- KeyF1
+		rkinputCli <- KeyF1
 		writekey("echo abc")
 		if m := <-back; m != "0" {
 			t.Error(m)
 			return
 		}
-		input <- KeyF6
-		input <- KeyF7
-		input <- KeyF8
-		input <- KeyF9
-		input <- KeyF10
+		rkinputCli <- KeyF6
+		rkinputCli <- KeyF7
+		rkinputCli <- KeyF8
+		rkinputCli <- KeyF9
+		rkinputCli <- KeyF10
 
 		//
 		//
-		input <- KeyF1
+		rkinputCli <- KeyF1
 		writekey("echo abc")
 		if m := <-back; m != "0" {
 			t.Error(m)
@@ -398,7 +482,7 @@ func TestMain(t *testing.T) {
 		}
 	}
 	{ //test command usage
-		input <- KeyF1
+		rkinputCli <- KeyF1
 		writekey("sadd")
 		if m := <-back; m == "0" {
 			t.Error(m)
@@ -557,6 +641,18 @@ func TestMain(t *testing.T) {
 			t.Error(m)
 			return
 		}
+		//
+		fmt.Println("testing not host list log---->")
+		resp, err := http.Get(terminal.WebSrv.URL + "/lslog")
+		var bys []byte
+		if err == nil {
+			bys, err = ioutil.ReadAll(resp.Body)
+		}
+		os.Stdout.Write(bys)
+		if err != nil {
+			t.Error(err)
+			return
+		}
 		// return
 	}
 	{ //test by web command
@@ -572,17 +668,17 @@ func TestMain(t *testing.T) {
 	// fmt.Fprintf(terminal, "echo %v$?\n", terminal.CmdPrefix)
 	fmt.Println()
 	time.Sleep(1 * time.Second)
-	input <- CharESC
-	input <- CharESC
-	input <- CharESC
+	rkinputCli <- CharESC
+	rkinputCli <- CharESC
+	rkinputCli <- CharESC
 	// input <- CharTerm
 	// input <- CharTerm
 	// input <- CharTerm
 	// input <- CharTerm
-	shelpUsage.String()
+	fmt.Println(shelpUsage.String())
 	time.Sleep(4 * time.Second)
 	server.Close()
-	input <- nil
+	//rkinput <- nil
 	tokenList.Set("abc")
 	tokenList.Set("abc")
 	time.Sleep(1 * time.Second)

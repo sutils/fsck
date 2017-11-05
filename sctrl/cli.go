@@ -12,9 +12,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/sutils/fsck"
-)
-import (
 	"container/list"
 	"encoding/json"
 	"io/ioutil"
@@ -23,8 +20,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sutils/fsck"
+
 	"github.com/Centny/gwf/util"
-	"github.com/sutils/readkey"
 )
 
 const (
@@ -129,13 +127,11 @@ type Terminal struct {
 	ctrlc   chan os.Signal
 	//
 	NotTaskCallback chan string
-
-	Resize bool
 	//
 	closed bool
 }
 
-func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, resize bool, buffered int) *Terminal {
+func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) *Terminal {
 	term := &Terminal{
 		// ss:        map[string]*SshSession{},
 		ss:           list.New(),
@@ -159,9 +155,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, resize bool, b
 		keyin:   make(chan []byte, 10240),
 		keydone: make(chan int),
 		ctrlc:   make(chan os.Signal, 1),
-		Resize:  resize,
 	}
-	term.Cmd.Resize = resize
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = httptest.NewUnstartedServer(term.Mux)
 	term.Mux.Handle("/exec", term.Web)
@@ -194,7 +188,6 @@ func (t *Terminal) ListLogName() (ns []string) {
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		ns = append(ns, em.Value.(*SshSession).Name)
 	}
-	ns = append(ns, "debug", "sctrl")
 	return
 }
 
@@ -808,7 +801,6 @@ func (t *Terminal) AddSession(name, uri string, connect bool, env map[string]int
 		host.Name, host.Channel, host.URI, host.Username, host.Password)
 	session := NewSshSession(t.C, host)
 	session.PreEnv = t.Env
-	session.Resize = t.Resize
 	session.EnableCallback([]byte(t.CmdPrefix), t.callback)
 	session.Add(NewNamedWriter(name, t.Log))
 	if connect {
@@ -937,6 +929,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 				ctrc++
 				if ctrc > 3 {
 					t.CloseExit()
+					t.keydone <- 1
 					continue
 				}
 			} else {
@@ -946,6 +939,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 				escc++
 				if escc > 2 {
 					t.CloseExit()
+					t.keydone <- 1
 					continue
 				}
 			} else {
@@ -988,9 +982,9 @@ func (t *Terminal) ProcReadkey() {
 	//wait for cosole ready.
 	time.Sleep(500 * time.Millisecond)
 	signal.Notify(t.ctrlc, os.Interrupt)
-	readkey.Open()
+	readkeyOpen("cli")
 	for t.running {
-		key, err := readkey.Read()
+		key, err := readkeyRead("cli")
 		if err != nil {
 			break
 		}
@@ -1002,17 +996,6 @@ func (t *Terminal) ProcReadkey() {
 			t.CloseExit()
 		}
 	}
-}
-
-func (t *Terminal) Write(p []byte) (n int, err error) {
-	t.keyin <- p
-	select {
-	case <-t.keydone:
-		n = len(p)
-	case <-time.After(8 * time.Second):
-		err = fmt.Errorf("%v operationg timeout", t.activited)
-	}
-	return
 }
 
 func (t *Terminal) Close() (err error) {
@@ -1036,7 +1019,7 @@ func (t *Terminal) Close() (err error) {
 	t.WebSrv.Close()
 	fmt.Printf("closing forward channel server...\n")
 	t.Forward.Close()
-	readkey.Close()
+	readkeyClose("cli")
 	t.running = false
 	fmt.Printf("clean done...\n")
 	return

@@ -1,10 +1,13 @@
 windows:
   - name: sctrl
     layout: layout-4-2
+    root: sctrl
     panes:
       - go build && ./sctrl -s -token abc
       - go build && ./sctrl -sc -master localhost:9234 -auth abc -name test
       - go build && ./sctrl-ssh.sh loc
       - go build && ./sctrl -lc debug
       - echo
-      - go build && ./sctrl -c
+      - commands:
+          - go build && ./sctrl -c
+        focus: true

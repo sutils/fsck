@@ -12,7 +12,6 @@ echo "Installing Dependence"
 #########Running Test#########
 echo "Running Test"
 pkgs="\
- github.com/sutils/fsck\
  github.com/sutils/fsck/sctrl\
 "
 

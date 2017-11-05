@@ -104,7 +104,6 @@ type WebLogger struct {
 	Name     string
 	allws    map[string]*WebLogWriter
 	wslck    sync.RWMutex
-	all      io.WriteCloser
 	Buffered int
 	allreq   map[string]*WaitWriter
 	LsName   func() []string
@@ -131,6 +130,8 @@ func (w *WebLogger) ListLogH(resp http.ResponseWriter, req *http.Request) {
 			ns = append(ns, n)
 		}
 		w.wslck.RUnlock()
+	} else {
+		ns = append(ns, "debug", "sctrl", "all", "allhost")
 	}
 	for idx, n := range ns {
 		idx = idx % 5
@@ -168,31 +169,24 @@ func (w *WebLogger) WebLogH(resp http.ResponseWriter, req *http.Request) {
 	fmt.Fprintf(buf, "%v->web logger is started by %v\n", w.Name, ns)
 	w.wslck.RUnlock()
 	buf.WriteTo(wwriter)
-	if ns == "all" {
-		w.wslck.Lock()
-		w.allreq[fmt.Sprintf("%p", wwriter)] = wwriter
-		w.all = wwriter
-		w.wslck.Unlock()
-		wwriter.Wait()
-		w.all = nil
-	} else {
-		w.wslck.Lock()
-		w.allreq[fmt.Sprintf("%p", wwriter)] = wwriter
-		used := []*WebLogWriter{}
-		for _, name := range strings.Split(ns, ",") {
-			ws := w.allws[name]
-			if ws == nil {
-				ws = NewWebLogWriter(w.Buffered)
-			}
-			ws.Add(wwriter, pre == "1")
-			used = append(used, ws)
-			w.allws[name] = ws
+	w.wslck.Lock()
+	w.allreq[fmt.Sprintf("%p", wwriter)] = wwriter
+	allws := []*WebLogWriter{}
+	for _, name := range strings.Split(ns, ",") {
+		ws := w.allws[name]
+		if ws == nil {
+			ws = NewWebLogWriter(w.Buffered)
 		}
-		w.wslck.Unlock()
-		wwriter.Wait()
-		for _, mw := range used {
-			mw.Remove(wwriter)
-		}
+		allws = append(allws, ws)
+		w.allws[name] = ws
+	}
+	w.wslck.Unlock()
+	for _, ws := range allws {
+		ws.Add(wwriter, pre == "1")
+	}
+	wwriter.Wait()
+	for _, ws := range allws {
+		ws.Remove(wwriter)
 	}
 	w.wslck.Lock()
 	delete(w.allreq, fmt.Sprintf("%p", wwriter))
@@ -200,18 +194,25 @@ func (w *WebLogger) WebLogH(resp http.ResponseWriter, req *http.Request) {
 	log.Printf("web log by name(%v) is done", ns)
 }
 
-func (w *WebLogger) Write(name string, p []byte) (n int, err error) {
+func (w *WebLogger) Write(tag string, p []byte) (n int, err error) {
 	n = len(p)
-	w.wslck.Lock()
-	ws := w.allws[name]
-	if ws == nil {
-		ws = NewWebLogWriter(w.Buffered)
+	allws := []*WebLogWriter{}
+	ns := []string{tag, "all"}
+	if tag != "debug" && tag != "sctrl" {
+		ns = append(ns, "allhost")
 	}
-	w.allws[name] = ws
+	w.wslck.Lock()
+	for _, n := range ns {
+		ws := w.allws[n]
+		if ws == nil {
+			ws = NewWebLogWriter(w.Buffered)
+		}
+		w.allws[n] = ws
+		allws = append(allws, ws)
+	}
 	w.wslck.Unlock()
-	ws.Write(p)
-	if allw := w.all; allw != nil {
-		allw.Write(p)
+	for _, ws := range allws {
+		ws.Write(p)
 	}
 	return
 }

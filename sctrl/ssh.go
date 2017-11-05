@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/sutils/fsck"
-	"github.com/sutils/readkey"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -225,10 +224,7 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	if len(pty) < 1 {
 		pty = "vt100"
 	}
-	var w, h int = 80, 60
-	if s.Resize {
-		w, h = readkey.GetSize()
-	}
+	w, h := readkeyGetSize()
 	err = s.session.RequestPty(pty, h, w, modes)
 	if err != nil {
 		return

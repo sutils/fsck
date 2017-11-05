@@ -38,6 +38,19 @@ var exitf = func(code int) {
 	readkey.Close()
 	os.Exit(code)
 }
+var readkeyRead = func(n string) (key []byte, err error) {
+	key, err = readkey.Read()
+	return
+}
+var readkeyClose = func(n string) {
+	readkey.Close()
+}
+var readkeyOpen = func(n string) {
+	readkey.Open()
+}
+var readkeyGetSize = readkey.GetSize
+var readkeySetSize = readkey.SetSize
+var stdin = os.Stdin
 
 type ArrayFlags []string
 
@@ -103,7 +116,6 @@ var wsconf string
 var bash string
 var ps1 string
 var instancePath string
-var input chan []byte
 var webcmd string
 var buffered int = 1024 * 1024
 
@@ -555,12 +567,12 @@ func sctrlClient() {
 		for {
 			fmt.Printf("Login to %v: ", serverAddr)
 			time.Sleep(100 * time.Millisecond)
-			readkey.Open()
+			readkeyOpen("login")
 			buf := []byte{}
 			for {
-				key, err := readkey.Read()
+				key, err := readkeyRead("login")
 				if err != nil || bytes.Equal(key, CharTerm) {
-					readkey.Close()
+					readkeyClose("login")
 					exitf(1)
 				}
 				if key[0] == '\r' {
@@ -597,7 +609,7 @@ func sctrlClient() {
 		exepath, _ = filepath.Abs(exepath)
 		webcmd, _ = filepath.Split(exepath)
 	}
-	terminal = NewTerminal(client, name, ps1, bash, webcmd, input == nil, buffered)
+	terminal = NewTerminal(client, name, ps1, bash, webcmd, buffered)
 	terminal.InstancePath = instancePath
 	for key, val := range conf.Env {
 		terminal.Env = append(terminal.Env, fmt.Sprintf("%v=%v", key, val))
@@ -616,17 +628,7 @@ func sctrlClient() {
 	fmt.Printf("%v is connected\n", serverAddr)
 	<-login
 	terminal.Start(conf)
-	if input == nil {
-		terminal.ProcReadkey()
-		exitf(0)
-		return
-	}
-	for key := range input {
-		if key == nil {
-			break
-		}
-		terminal.Write(key)
-	}
+	terminal.ProcReadkey()
 	exitf(0)
 }
 
@@ -650,28 +652,6 @@ func execCmds(cmds string, log, wait, single bool) (code int, err error) {
 	return
 }
 
-func sctrlRawLogCli(name ...string) {
-	var url, last string
-	var err error
-	delay := 5 * time.Second
-	ns := strings.Join(name, ",")
-	logw := NewWebLogPrinter(os.Stdout)
-	for {
-		url, last, err = findWebURL(last, true, true, false, delay)
-		if err != nil { //having error.
-			fmt.Println(err)
-			exitf(1)
-		}
-		_, err := ExecWebLog(url+"/log", ns, "1", logw)
-		if err != nil && reflect.TypeOf(err).String() == "*url.Error" && len(last) > 0 {
-			fmt.Printf("->last instance(%v) is offline, will try after %v\n", last, delay)
-		} else {
-			fmt.Printf("->reply error(%v):%v\n", reflect.TypeOf(err), err)
-		}
-		time.Sleep(delay)
-	}
-}
-
 func sctrlLogCli(name ...string) {
 	var url, last string
 	var err error
@@ -691,6 +671,7 @@ func sctrlLogCli(name ...string) {
 				fmt.Println(err)
 				exitf(1)
 			}
+			logw = NewWebLogPrinter(os.Stdout)
 			_, err := ExecWebLog(url+"/log", ns, pre, logw)
 			if switching {
 				continue
@@ -703,16 +684,17 @@ func sctrlLogCli(name ...string) {
 			time.Sleep(delay)
 		}
 		pre = "0"
+		fmt.Printf("log %v is done...\n", ns)
 		done <- 1
 	}
 	go runlog()
-	var buf []byte
 	var idxSwitch = func(idx int) {
+		if switching {
+			return
+		}
 		fmt.Printf("\nWaiting log %v stop...\n", ns)
 		switching = true
-		old := logw
-		logw = NewWebLogPrinter(os.Stdout)
-		old.Close()
+		logw.Close()
 		var bys []byte
 		resp, err := http.Get(url + "/lslog")
 		if err == nil {
@@ -733,18 +715,22 @@ func sctrlLogCli(name ...string) {
 			}
 			allns = append(allns, n)
 		}
-		if idx >= len(allns) {
+		if idx < 0 {
+			ns = "allhost"
+		} else if idx >= len(allns) {
 			fmt.Printf("\n->switch fail with index out of bound by %v, rollback to %v\n", idx, ns)
-			time.Sleep(2 * time.Second)
+			time.Sleep(1 * time.Second)
 		} else {
 			ns = allns[idx]
 		}
 		switching = false
+		fmt.Printf("->switch done to %v\n", ns)
 		go runlog()
 	}
-	readkey.Open()
+	readkeyOpen("log")
+	var buf []byte
 	for {
-		key, err := readkey.Read()
+		key, err := readkeyRead("log")
 		if err != nil || bytes.Equal(key, CharTerm) {
 			fmt.Println()
 			break
@@ -754,29 +740,30 @@ func sctrlLogCli(name ...string) {
 				buf = buf[0 : len(buf)-1]
 				os.Stdout.WriteString("\b \b")
 			}
+			// fmt.Println(buf, key)
 			continue
 		}
 		switch {
 		case bytes.Equal(key, KeyF1):
-			idxSwitch(0)
+			idxSwitch(-1)
 		case bytes.Equal(key, KeyF2):
-			idxSwitch(1)
+			idxSwitch(0)
 		case bytes.Equal(key, KeyF3):
-			idxSwitch(2)
+			idxSwitch(1)
 		case bytes.Equal(key, KeyF4):
-			idxSwitch(3)
+			idxSwitch(2)
 		case bytes.Equal(key, KeyF5):
-			idxSwitch(4)
+			idxSwitch(3)
 		case bytes.Equal(key, KeyF6):
-			idxSwitch(5)
+			idxSwitch(4)
 		case bytes.Equal(key, KeyF7):
-			idxSwitch(6)
+			idxSwitch(5)
 		case bytes.Equal(key, KeyF8):
-			idxSwitch(7)
+			idxSwitch(6)
 		case bytes.Equal(key, KeyF9):
-			idxSwitch(8)
+			idxSwitch(7)
 		case bytes.Equal(key, KeyF10):
-			idxSwitch(9)
+			idxSwitch(8)
 		default:
 			if key[0] != '\r' {
 				buf = append(buf, key...)
@@ -795,9 +782,7 @@ func sctrlLogCli(name ...string) {
 			} else {
 				fmt.Printf("\nWaiting log %v stop...\n", ns)
 				switching = true
-				old := logw
-				logw = NewWebLogPrinter(os.Stdout)
-				old.Close()
+				logw.Close()
 				resp, err := http.Get(url + "/lslog")
 				<-done
 				if err != nil {
@@ -974,7 +959,7 @@ func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url s
 		for {
 			buf.WriteTo(os.Stdout)
 			fmt.Fprintf(os.Stdout, "Please select one(type r to reload)[0]:")
-			readed, _ := os.Stdin.Read(rbuf)
+			readed, _ := stdin.Read(rbuf)
 			key = strings.TrimSpace(string(rbuf[:readed]))
 			if key == "r" {
 				//reload instance info from file.

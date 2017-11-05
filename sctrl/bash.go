@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kr/pty"
-	"github.com/sutils/readkey"
 )
 
 type Cmd struct {
@@ -21,7 +20,6 @@ type Cmd struct {
 	out    *OutWriter
 	Prefix io.Reader
 	OnExit func(err error)
-	Resize bool
 }
 
 func NewCmd(name, ps1, shell string) (cmd *Cmd) {
@@ -31,7 +29,6 @@ func NewCmd(name, ps1, shell string) (cmd *Cmd) {
 		Cmd:         exec.Command(shell),
 		out:         NewOutWriter(),
 		MultiWriter: NewMultiWriter(),
-		Resize:      true,
 	}
 	cmd.MultiWriter.Add(cmd.out)
 	cmd.Env = os.Environ()
@@ -58,14 +55,12 @@ func (c *Cmd) Start() (err error) {
 		vpty.Close()
 		return
 	}
-	if c.Resize {
-		w, h := readkey.GetSize()
-		err = readkey.SetSize(vpty.Fd(), w, h)
-		if err != nil {
-			tty.Close()
-			vpty.Close()
-			return
-		}
+	w, h := readkeyGetSize()
+	err = readkeySetSize(vpty.Fd(), w, h)
+	if err != nil {
+		tty.Close()
+		vpty.Close()
+		return
 	}
 	c.Cmd.Stdout = tty
 	c.Cmd.Stdin = tty
