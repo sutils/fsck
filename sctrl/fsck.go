@@ -602,6 +602,7 @@ func sctrlClient() {
 			fmt.Printf("\nlogin to %v fail with %v\n", serverAddr, err)
 			exitf(1)
 		}
+		fmt.Printf("login to %v success\n", serverAddr)
 		login <- 1
 	}
 	if len(webcmd) < 1 {

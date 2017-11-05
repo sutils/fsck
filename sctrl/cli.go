@@ -878,6 +878,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 	if err != nil {
 		return
 	}
+
 	//
 	go t.handleCallback()
 	//
@@ -975,6 +976,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 			t.keydone <- 1
 		}
 	}()
+	fmt.Println("sctrl start success...")
 	return
 }
 
