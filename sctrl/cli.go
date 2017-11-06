@@ -512,9 +512,10 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 func (t *Terminal) execPingTask(task *Task, name string) {
 	data := "1234567890qwertyuiopasdfghjklzxcvbnm"
 	for {
-		used, err := t.C.Ping(name, data)
+		used, slaver, err := t.C.Ping(name, data)
 		if err == nil {
-			_, err = fmt.Fprintf(task, "%v bytes from %v: time=%v\n", len(data), name, time.Duration(used)*time.Millisecond)
+			_, err = fmt.Fprintf(task, "%v bytes from %v: time=%v slaver=%v\n", len(data), name,
+				time.Duration(used)*time.Millisecond, time.Duration(slaver)*time.Millisecond)
 		} else {
 			_, err = fmt.Fprintf(task, "ping to %v fail with %v\n", name, err)
 		}

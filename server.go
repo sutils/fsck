@@ -296,6 +296,7 @@ func (m *Master) OnChannelCmd(c netw.Cmd) int {
 func (m *Master) Send(ctype, cid string, c netw.Cmd, data []byte) int {
 	cmdc := m.L.CmdC(cid)
 	if cmdc == nil {
+		log.D("Master transfer data to %v by cid(%v) fail with connect not found", ctype, cid)
 		c.Writeb([]byte(fmt.Sprintf("%v not found by id(%v)", ctype, cid)))
 		return -1
 	}
@@ -318,6 +319,7 @@ func (m *Master) OnSlaverCmd(c netw.Cmd) int {
 	cid := m.clients[session]
 	m.slck.RUnlock()
 	if len(session) < 1 {
+		log.D("Master transfer data to client by name(%v),sid(%v) fail with session not found", name, sid)
 		c.Writeb([]byte(ErrSessionNotFound.Error()))
 		return 0
 	}
@@ -333,6 +335,7 @@ func (m *Master) OnClientCmd(c netw.Cmd) int {
 	cid := m.slavers[name]
 	m.slck.RUnlock()
 	if len(name) < 1 {
+		log.D("Master transfer data to slaver by session(%v),sid(%v) fail with name not found", session, sid)
 		c.Writeb([]byte(ErrSessionNotFound.Error()))
 		return 0
 	}
@@ -438,8 +441,8 @@ func (s *Slaver) List() (res util.Map, err error) {
 	return s.Channel.List()
 }
 
-func (s *Slaver) Ping(name, data string) (used int64, err error) {
-	used, err = s.Channel.Ping(name, data)
+func (s *Slaver) Ping(name, data string) (used, slaver int64, err error) {
+	used, slaver, err = s.Channel.Ping(name, data)
 	return
 }
 
@@ -578,12 +581,15 @@ func (c *Channel) PingH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	return
 }
 
-func (c *Channel) Ping(name, data string) (used int64, err error) {
+func (c *Channel) Ping(name, data string) (used, slaver int64, err error) {
 	beg := util.Now()
-	_, err = c.RM.Exec_m("ping", util.Map{
+	res, err := c.RM.Exec_m("ping", util.Map{
 		"data": data,
 		"name": name,
 	})
+	if err == nil {
+		slaver = res.IntValV(name, 0)
+	}
 	used = util.Now() - beg
 	return
 }
