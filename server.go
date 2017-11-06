@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/netw"
@@ -95,6 +96,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddHFunc("dial", m.DailH)
 	m.L.AddHFunc("close", m.CloseH)
 	m.L.AddHFunc("list", m.ListH)
+	m.L.AddHFunc("ping", m.PingH)
 	err = m.L.Run()
 	return
 }
@@ -239,6 +241,38 @@ func (m *Master) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		log.D("Master close session(%v) on name(%v) success", sid, name)
 	} else {
 		log.D("Master close session(%v) on name(%v) fail with %v", sid, name, err)
+	}
+	return
+}
+
+func (m *Master) PingH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	var name string
+	err = rc.ValidF(`
+		name,R|S,L:0;
+		`, &name)
+	if err != nil {
+		return
+	}
+	m.slck.RLock()
+	cid := m.slavers[name]
+	m.slck.RUnlock()
+	cmdc := m.L.CmdC(cid)
+	if cmdc == nil {
+		err = fmt.Errorf("slaver not found")
+		log.D("Master ping slaver(%v) fail with %v", name, err)
+		return
+	}
+	beg := util.Now()
+	res, err := cmdc.Exec_m("ping", util.Map{
+		"data": rc.Val("data"),
+	})
+	if err == nil {
+		used := util.Now() - beg
+		res[name] = used
+		val = res
+		log.D("Master ping slaver(%v) success by used(%v)", name, time.Duration(used)*time.Millisecond)
+	} else {
+		log.D("Master ping slaver(%v) fail with %v", name, err)
 	}
 	return
 }
@@ -404,6 +438,11 @@ func (s *Slaver) List() (res util.Map, err error) {
 	return s.Channel.List()
 }
 
+func (s *Slaver) Ping(name, data string) (used int64, err error) {
+	used, err = s.Channel.Ping(name, data)
+	return
+}
+
 //OnConn see ConHandler for detail
 func (s *Slaver) OnConn(con netw.Con) bool {
 	//fmt.Println("master is connected")
@@ -444,6 +483,7 @@ func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S
 	}
 	channel.RS.AddHFunc("dial", channel.DialH)
 	channel.RS.AddHFunc("close", channel.CloseH)
+	channel.RS.AddHFunc("ping", channel.PingH)
 	channel.BH.AddF(ChannelCmdC, channel.OnMasterCmd)
 	return channel
 }
@@ -528,6 +568,23 @@ func (c *Channel) Dial(name, uri string) (sid uint16, err error) {
 
 func (c *Channel) List() (res util.Map, err error) {
 	res, err = c.RM.Exec_m("list", util.Map{})
+	return
+}
+
+func (c *Channel) PingH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	val = util.Map{
+		"data": rc.Val("data"),
+	}
+	return
+}
+
+func (c *Channel) Ping(name, data string) (used int64, err error) {
+	beg := util.Now()
+	_, err = c.RM.Exec_m("ping", util.Map{
+		"data": data,
+		"name": name,
+	})
+	used = util.Now() - beg
 	return
 }
 

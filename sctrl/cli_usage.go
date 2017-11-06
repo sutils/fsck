@@ -107,6 +107,11 @@ var smasterUsage = NewUsage("Sctrl smaster version %v\n", Version).
 	Append("       smaster will show the master status\n").
 	Append("Usage: smaster\n")
 
+var spingUsage = NewUsage("Sctrl ping version %v\n", Version).
+	Append("       sping will ping to remote slaver and return the delay\n").
+	Append("Usage: sping <host name>\n").
+	Append("       sping host1\n")
+
 var shelpUsage = NewUsage("Sctrl version %v\n", Version).
 	Append("       sctrl console is helpful tool to manager multi host in inner network.\n").
 	Append("Supported:\n").

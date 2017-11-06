@@ -177,6 +177,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 	fmt.Fprintf(prefix, "alias smaster='%v/sctrl -run smaster'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sprofile='%v/sctrl -run profile'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sscp='%v/sctrl-scp'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sping='%v/sctrl -run sping'\n", webcmd)
 	fmt.Fprintf(prefix, "history -d `history 1`\n")
 	fmt.Fprintf(prefix, "set -o history\n")
 	term.Cmd.Prefix = prefix
@@ -399,6 +400,15 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			data = buf.Bytes()
 		}
 		return
+	case "sping":
+		if len(cmds) < 2 {
+			err = srmmapUsage
+			return
+		}
+		task := NewTask()
+		task.Selected = t.selected
+		data = task
+		go t.execPingTask(task, cmds[1])
 	case "shelp":
 		fallthrough
 	case "":
@@ -497,6 +507,23 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		err = fmt.Errorf("-error: command %v not found", line)
 	}
 	return
+}
+
+func (t *Terminal) execPingTask(task *Task, name string) {
+	data := "1234567890qwertyuiopasdfghjklzxcvbnm"
+	for {
+		used, err := t.C.Ping(name, data)
+		if err == nil {
+			_, err = fmt.Fprintf(task, "%v bytes from %v: time=%v\n", len(data), name, time.Duration(used)*time.Millisecond)
+		} else {
+			_, err = fmt.Fprintf(task, "ping to %v fail with %v\n", name, err)
+		}
+		if err != nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	task.Close()
 }
 
 func (t *Terminal) checkHostForward(name string) (session *SshSession, mapping *fsck.Mapping, err error) {

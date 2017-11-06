@@ -62,6 +62,14 @@ func TestRc(t *testing.T) {
 	time.Sleep(time.Second)
 	// client.R.Login_(token string)
 	//
+	//test ping
+	used, err := client.Ping("master", "data")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	fmt.Println("ping to master used ", used)
+	//
 	session, err := client.DialSession("master", "localhost:9392")
 	if err != nil {
 		t.Error(err)
@@ -80,6 +88,12 @@ func TestRc(t *testing.T) {
 	}
 	//test error
 	{
+		//test ping to unknow
+		_, err = client.Ping("xxxx", "data")
+		if err == nil {
+			t.Error(err)
+			return
+		}
 		//dial to unknow remote
 		_, err = client.DialSession("master", "localhost:732")
 		if err == nil {
