@@ -1020,7 +1020,7 @@ func (t *Terminal) ProcReadkey() {
 		t.keyin <- key
 		select {
 		case <-t.keydone:
-		case <-time.After(8 * time.Second):
+		case <-time.After(30 * time.Second):
 			fmt.Printf("%v operationg timeout\n", t.activited)
 			t.CloseExit()
 		}
