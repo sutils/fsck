@@ -145,6 +145,54 @@ func TestMain(t *testing.T) {
 	var writekey = func(format string, args ...interface{}) {
 		rkinputCli <- []byte(fmt.Sprintf("%v\necho %v$?\n", fmt.Sprintf(format, args...), terminal.CmdPrefix))
 	}
+	{
+		//test switch
+		rkinputCli <- CharCtrlb
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- CharEnter
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- []byte("loc")
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- CharDelete
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- []byte("c")
+		time.Sleep(time.Second)
+		rkinputCli <- CharEnter
+		time.Sleep(5 * time.Second)
+		//
+		rkinputCli <- CharCtrlb
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- []byte("sctrl")
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- CharEnter
+		time.Sleep(time.Second)
+		//
+		rkinputCli <- CharCtrlb
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- []byte("xxxxxx")
+		time.Sleep(500 * time.Millisecond)
+		rkinputCli <- CharEnter
+		time.Sleep(time.Second)
+		//
+		rkinputCli <- KeyF1
+		time.Sleep(2 * time.Second)
+	}
+	{
+		fmt.Println("testing sping---->")
+		rkinputCli <- []byte("sping test\n")
+		time.Sleep(3 * time.Second)
+		rkinputCli <- CharTerm
+		rkinputCli <- CharTerm
+		time.Sleep(time.Second)
+	}
+	{
+		fmt.Println("testing kill---->")
+		rkinputCli <- []byte("sexec sleep 10\n")
+		time.Sleep(2 * time.Second)
+		rkinputCli <- CharTerm
+		rkinputCli <- CharTerm
+		time.Sleep(2 * time.Second)
+	}
 	//
 	{ //test log cli
 		//
@@ -165,26 +213,35 @@ func TestMain(t *testing.T) {
 		//
 		fmt.Println("test log cli by index--->")
 		rkinputLog <- KeyF10
+		fmt.Println("key10 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF9
+		fmt.Println("key9 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF8
+		fmt.Println("key8 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF7
+		fmt.Println("key7 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF6
+		fmt.Println("key6 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF5
+		fmt.Println("key5 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF4
+		fmt.Println("key4 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF3
+		fmt.Println("key3 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF2
+		fmt.Println("key2 done")
 		time.Sleep(time.Second)
 		rkinputLog <- KeyF1
-		time.Sleep(time.Second)
-
+		fmt.Println("key1 done")
+		time.Sleep(2 * time.Second)
 	}
 	//
 	writekey("shelp")
@@ -609,6 +666,18 @@ func TestMain(t *testing.T) {
 			t.Error(m)
 			return
 		}
+		//
+		writekey("sping")
+		if m := <-back; m == "0" {
+			t.Error(m)
+			return
+		}
+		//
+		writekey("sexec sterm")
+		if m := <-back; m == "0" {
+			t.Error(m)
+			return
+		}
 	}
 	{ // not host
 		writekey("spick loc2 loc3")
@@ -657,6 +726,18 @@ func TestMain(t *testing.T) {
 	}
 	{ //test by web command
 		sctrlExec("shelp")
+		wait := make(chan int)
+		go func() {
+			sctrlExec("sexec sleep 10")
+			wait <- 0
+		}()
+		for ctrlcSig == nil {
+			time.Sleep(time.Second)
+			fmt.Println("ctrlc is nil")
+		}
+		time.Sleep(time.Second)
+		ctrlcSig <- os.Interrupt
+		<-wait
 	}
 	{ //test error
 		exitf = notexit

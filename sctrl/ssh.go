@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sutils/fsck"
@@ -155,7 +156,7 @@ type SshSession struct {
 	stdin   io.Writer
 	Prefix  io.Reader
 	PreEnv  []string
-	Resize  bool
+	lck     sync.RWMutex
 }
 
 func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
@@ -164,7 +165,7 @@ func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
 		C:           c,
 		out:         NewOutWriter(),
 		MultiWriter: NewMultiWriter(),
-		Resize:      true,
+		lck:         sync.RWMutex{},
 	}
 	ss.MultiWriter.Add(ss.out)
 	return ss
@@ -262,6 +263,8 @@ func (s *SshSession) Wait() (err error) {
 }
 
 func (s *SshSession) Write(p []byte) (n int, err error) {
+	s.lck.Lock()
+	defer s.lck.Unlock()
 	for i := 0; i < 3; i++ {
 		if !s.Running {
 			err = s.Start()

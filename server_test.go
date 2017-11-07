@@ -86,10 +86,42 @@ func TestRc(t *testing.T) {
 		t.Error("error")
 		return
 	}
+	{
+		//test slaver login not name
+		wait := make(chan error)
+		slaver1 := NewSlaver("xxx1")
+		slaver1.OnLogin = func(l *rc.AutoLoginH, err error) {
+			wait <- err
+		}
+		slaver1.Start("localhost:9372", "", "", "abc", TypeSlaver)
+		err = <-wait
+		if err == nil {
+			t.Error(err)
+			return
+		}
+		fmt.Println("test slaver login not name done...")
+		//test client login not session
+		slaver2 := NewSlaver("xxx2")
+		slaver2.OnLogin = func(l *rc.AutoLoginH, err error) {
+			wait <- err
+		}
+		slaver2.Start("localhost:9372", "", "", "abc", TypeClient)
+		err = <-wait
+		if err == nil {
+			t.Error(err)
+			return
+		}
+		fmt.Println("test client login not name done..")
+	}
 	//test error
 	{
 		//test ping to unknow
 		_, _, err = client.Ping("xxxx", "data")
+		if err == nil {
+			t.Error(err)
+			return
+		}
+		_, _, err = client.Ping("", "data")
 		if err == nil {
 			t.Error(err)
 			return
@@ -280,6 +312,8 @@ func TestRc(t *testing.T) {
 		//
 		server.Master.OnCmd(nil)
 		client.OnCmd(nil)
+		//
+		fmt.Println("test error done...")
 	}
 	res, err := client.List()
 	if err != nil {
@@ -294,7 +328,36 @@ func TestRc(t *testing.T) {
 		t.Error(res)
 		return
 	}
-	{ //test handler error
+	{
+		//test session is empty
+		for _, c := range server.Master.L.CmdCs() {
+			c.Kvs().SetVal("session", "")
+		}
+		_, err = client.DialSession("master", "localhost:10")
+		if err == nil {
+			t.Error("not dail error")
+			return
+		}
+		_, err = client.R.Exec_m("/usr/close", util.Map{
+			"sid": 100,
+		})
+		if err == nil {
+			t.Error("not close error")
+			return
+		}
+		// test not login
+		for _, c := range server.Master.L.CmdCs() {
+			c.Kvs().SetVal("ctype", "")
+		}
+		_, err = client.R.Exec_m("/usr/close", util.Map{
+			"sid": 100,
+		})
+		if err == nil {
+			t.Error("not close error")
+			return
+		}
+	}
+	{ //test client handler error
 		runner := rc.NewRC_Runner_m_j(pool.BP, "localhost:9372", netw.NewDoNotH())
 		runner.Start()
 		err = runner.LoginV("abc", util.Map{
@@ -306,10 +369,30 @@ func TestRc(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		runner.Close()
+		runner.Stop()
 		cid := server.clients["xxm"]
 		// fmt.Println("---->")
 		server.Send(TypeSlaver, cid, &mockcmd{}, []byte("abc"))
+		//
+	}
+	{ //test slaver handler error
+		runner := rc.NewRC_Runner_m_j(pool.BP, "localhost:9372", netw.NewDoNotH())
+		runner.Start()
+		err = runner.LoginV("abc", util.Map{
+			"alias": "xxm",
+			"ctype": TypeSlaver,
+			"name":  "xxm",
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_, _, err = client.Ping("xxm", "xxx")
+		if err == nil {
+			t.Error(err)
+			return
+		}
+		runner.Stop()
 
 	}
 	time.Sleep(1 * time.Second)

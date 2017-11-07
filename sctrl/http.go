@@ -6,8 +6,14 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 )
+
+type WebHeader interface {
+	Header() map[string]string
+}
 
 type NoBufferResponseWriter struct {
 	w       http.ResponseWriter
@@ -67,6 +73,13 @@ func (w *Web) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 			fmt.Fprintf(resp, "%v\n", err)
 			return
 		}
+		header, ok := data.(WebHeader)
+		if ok && header != nil {
+			fields := header.Header()
+			for key, val := range fields {
+				resp.Header().Set(key, val)
+			}
+		}
 		switch data.(type) {
 		case io.Reader:
 			// resp.Header().Add("Content-Type", "application/octet-stream")
@@ -82,26 +95,58 @@ func (w *Web) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
+var ctrlcSig chan os.Signal
+
 func ExecWebCmd(url string, cmds string, out io.Writer) (code int, err error) {
-	resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds="+cmds))
-	if err == nil {
-		code = resp.StatusCode
-		callback := make(chan []byte, 3)
-		outw := NewOutWriter()
-		outw.Out = out
-		outw.EnableCallback([]byte(WebCmdPrefix), callback)
-		_, err = io.Copy(outw, resp.Body)
-		if err == io.EOF {
-			err = nil
+	var sterm = func(tid string) {
+		resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds=sterm "+tid))
+		if err != nil {
+			fmt.Fprintf(out, "-send kill to task(%v) fail with %v", tid, err)
+			return
 		}
-		if err == nil {
-			callback <- nil
-			reply := <-callback
-			if reply != nil && string(reply) != "ok" {
-				err = fmt.Errorf("%v", string(reply))
-			}
+		_, err = io.Copy(out, resp.Body)
+		if err != nil && err != io.EOF {
+			fmt.Fprintf(out, "-kill task(%v) reply error %v", tid, err)
+			return
 		}
 	}
+	resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds="+cmds))
+	if err != nil {
+		return
+	}
+	code = resp.StatusCode
+	callback := make(chan []byte, 3)
+	outw := NewOutWriter()
+	outw.Out = out
+	outw.EnableCallback([]byte(WebCmdPrefix), callback)
+	tid := resp.Header.Get("tid")
+	//
+	var running = true
+	if len(tid) > 0 {
+		ctrlcSig = make(chan os.Signal)
+		signal.Notify(ctrlcSig, os.Interrupt)
+		defer signal.Stop(ctrlcSig)
+		go func() {
+			for running {
+				<-ctrlcSig
+				fmt.Println()
+				sterm(tid)
+			}
+		}()
+	}
+	//
+	_, err = io.Copy(outw, resp.Body)
+	if err == io.EOF {
+		err = nil
+	}
+	if err == nil {
+		callback <- nil
+		reply := <-callback
+		if reply != nil && string(reply) != "ok" {
+			err = fmt.Errorf("%v", string(reply))
+		}
+	}
+	running = false
 	return
 }
 

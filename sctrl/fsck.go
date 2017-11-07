@@ -665,6 +665,7 @@ func sctrlLogCli(name ...string) {
 	done := make(chan int)
 	switching := false
 	var runlog = func() {
+		done <- 0
 		fmt.Printf("\n\n------------------ %v ------------------\n", ns)
 		for !switching {
 			url, last, err = findWebURL(last, true, true, false, delay)
@@ -684,7 +685,7 @@ func sctrlLogCli(name ...string) {
 			}
 			time.Sleep(delay)
 		}
-		pre = "0"
+		// pre = "0"
 		fmt.Printf("log %v is done...\n", ns)
 		done <- 1
 	}
@@ -726,7 +727,9 @@ func sctrlLogCli(name ...string) {
 		}
 		switching = false
 		fmt.Printf("->switch done to %v\n", ns)
+		fmt.Printf("\033]0;Sctrl Log(%v)\a", ns)
 		go runlog()
+		<-done
 	}
 	readkeyOpen("log")
 	var buf []byte
@@ -779,6 +782,7 @@ func sctrlLogCli(name ...string) {
 				ns = strings.TrimSpace(string(buf))
 				switching = false
 				go runlog()
+				<-done
 				buf = nil
 			} else {
 				fmt.Printf("\nWaiting log %v stop...\n", ns)

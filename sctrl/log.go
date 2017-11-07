@@ -33,14 +33,16 @@ func (n *NamedWriter) Write(p []byte) (writed int, err error) {
 }
 
 type WaitWriter struct {
-	W    io.Writer
-	wait chan error
+	W       io.Writer
+	wait    chan error
+	running bool
 }
 
 func NewWaitWriter(w io.Writer) *WaitWriter {
 	return &WaitWriter{
-		W:    w,
-		wait: make(chan error),
+		W:       w,
+		wait:    make(chan error),
+		running: true,
 	}
 }
 
@@ -50,7 +52,7 @@ func (w *WaitWriter) Write(p []byte) (n int, err error) {
 		return
 	}
 	n, err = w.W.Write(p)
-	if err != nil {
+	if err != nil && w.running {
 		w.wait <- err
 		w.W = nil
 	}
@@ -62,6 +64,7 @@ func (w *WaitWriter) Wait() error {
 }
 
 func (w *WaitWriter) Close() error {
+	w.running = false
 	w.wait <- io.EOF
 	close(w.wait)
 	return nil
@@ -119,7 +122,6 @@ func NewWebLogger(name string, buffered int) *WebLogger {
 	}
 }
 func (w *WebLogger) ListLogH(resp http.ResponseWriter, req *http.Request) {
-	max := make([]int, 5)
 	ns := []string{}
 	if w.LsName != nil {
 		ns = w.LsName()
@@ -133,20 +135,7 @@ func (w *WebLogger) ListLogH(resp http.ResponseWriter, req *http.Request) {
 	} else {
 		ns = append(ns, "debug", "sctrl", "all", "allhost")
 	}
-	for idx, n := range ns {
-		idx = idx % 5
-		if max[idx] < len(n) {
-			max[idx] = len(n)
-		}
-	}
-	buf := bytes.NewBuffer(nil)
-	for idx, n := range ns {
-		fmt.Fprintf(buf, fmt.Sprintf(" %%%vs  ", max[idx%5]), n)
-		if idx > 0 && idx%5 == 0 {
-			fmt.Fprintln(buf)
-		}
-	}
-	buf.WriteTo(resp)
+	WriteColumn(resp, ns...)
 }
 
 func (w *WebLogger) WebLogH(resp http.ResponseWriter, req *http.Request) {

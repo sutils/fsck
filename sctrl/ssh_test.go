@@ -57,7 +57,6 @@ func TestScp(t *testing.T) {
 		return
 	}
 	sesson := NewSshSession(nil, host)
-	sesson.Resize = false
 	conn, err := net.Dial("tcp", "loc.m:22")
 	if err != nil {
 		t.Error(err)

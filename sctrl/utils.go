@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"container/list"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -141,4 +143,28 @@ func JoinArgs(cmd string, args ...string) string {
 func MarshalAll(v interface{}) string {
 	bys, _ := json.Marshal(v)
 	return string(bys)
+}
+
+func ColumnBytes(vals ...string) (buf *bytes.Buffer) {
+	max := make([]int, 5)
+	for idx, n := range vals {
+		idx = idx % 5
+		if max[idx] < len(n) {
+			max[idx] = len(n)
+		}
+	}
+	buf = bytes.NewBuffer(nil)
+	for idx, n := range vals {
+		fmt.Fprintf(buf, fmt.Sprintf(" %%%vs  ", max[idx%5]), n)
+		if idx > 0 && idx%5 == 0 {
+			fmt.Fprintln(buf)
+		}
+	}
+	return
+}
+
+func WriteColumn(w io.Writer, vals ...string) (n int64, err error) {
+	buf := ColumnBytes(vals...)
+	n, err = buf.WriteTo(w)
+	return
 }

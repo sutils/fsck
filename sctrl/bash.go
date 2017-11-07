@@ -88,7 +88,7 @@ func (c *Cmd) Start() (err error) {
 	if c.Prefix != nil {
 		io.Copy(c, c.Prefix)
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 	return
 }
 

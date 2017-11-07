@@ -121,6 +121,7 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	cid, _ = m.L.RCH.OnLogin(rc, token)
 	var old string
 	m.slck.Lock()
+	defer m.slck.Unlock()
 	if ctype == TypeSlaver {
 		if len(name) < 1 {
 			err = fmt.Errorf("name is required for slaver")
@@ -137,13 +138,11 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 		m.clients[session] = cid
 	} else {
 		err = fmt.Errorf("the ctype must be in slaver/client")
-		m.slck.Unlock()
 		return
 	}
 	rc.Kvs().SetVal("name", name)
 	rc.Kvs().SetVal("ctype", ctype)
 	rc.Kvs().SetVal("session", session)
-	m.slck.Unlock()
 	m.L.AddC_rc(cid, rc)
 	m.L.CloseC(old)
 	if ctype == TypeSlaver {
@@ -239,6 +238,10 @@ func (m *Master) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		return
 	}
 	session := rc.Kvs().StrVal("session")
+	if len(session) < 1 {
+		err = fmt.Errorf("the session is empty, not login?")
+		return
+	}
 	m.slck.RLock()
 	name := m.si2n[fmt.Sprintf("%v-%v", session, sid)]
 	cid := m.slavers[name]
@@ -447,6 +450,7 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 		s.R.HbDelay = s.HbDelay
 		s.R.StartHbTimer()
 	}
+
 	return s.R.Valid()
 }
 
