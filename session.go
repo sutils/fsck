@@ -179,12 +179,13 @@ func (s *SessionPool) Remove(sid uint16) (session *Session) {
 func (s *SessionPool) Write(p []byte) (n int, err error) {
 	if len(p) < 3 {
 		err = fmt.Errorf("frame must be greater 3 bytes")
+		log.E("SessionPool receive data fail with %v", err)
 		return
 	}
 	sid := binary.BigEndian.Uint16(p[1:])
 	session := s.Find(sid)
 	if session == nil {
-		log.D("SesssionPool(%p) find session fail by sid(%v)", s, sid)
+		log.D("SesssionPool find session fail by sid(%v)", sid)
 		err = ErrSessionNotFound
 		return
 	}

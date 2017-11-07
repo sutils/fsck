@@ -63,7 +63,7 @@ func TestRc(t *testing.T) {
 	// client.R.Login_(token string)
 	//
 	//test ping
-	used, err := client.Ping("master", "data")
+	used, _, err := client.Ping("master", "data")
 	if err != nil {
 		t.Error(err)
 		return
@@ -89,7 +89,7 @@ func TestRc(t *testing.T) {
 	//test error
 	{
 		//test ping to unknow
-		_, err = client.Ping("xxxx", "data")
+		_, _, err = client.Ping("xxxx", "data")
 		if err == nil {
 			t.Error(err)
 			return
@@ -169,7 +169,7 @@ func TestRc(t *testing.T) {
 		}
 		//
 		//close sid not setted.
-		_, err = client.R.Exec_m("close", nil)
+		_, err = client.R.Exec_m("/usr/close", nil)
 		if err == nil {
 			t.Error(err)
 			return

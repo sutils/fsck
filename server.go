@@ -93,12 +93,21 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.LCH = m
 	m.L.AddToken(ts)
 	m.L.RCBH.AddF(ChannelCmdS, m.OnChannelCmd)
-	m.L.AddHFunc("dial", m.DailH)
-	m.L.AddHFunc("close", m.CloseH)
-	m.L.AddHFunc("list", m.ListH)
+	m.L.AddFFunc("^/usr/.*$", m.AccessH)
+	m.L.AddHFunc("/usr/dial", m.DailH)
+	m.L.AddHFunc("/usr/close", m.CloseH)
+	m.L.AddHFunc("/usr/list", m.ListH)
 	m.L.AddHFunc("ping", m.PingH)
 	err = m.L.Run()
 	return
+}
+
+func (m *Master) AccessH(rc *impl.RCM_Cmd) (bool, interface{}, error) {
+	ctype := rc.Kvs().StrVal("ctype")
+	if len(ctype) < 1 {
+		return false, nil, fmt.Errorf("not login")
+	}
+	return true, nil, nil
 }
 
 func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error) {
@@ -113,9 +122,17 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	var old string
 	m.slck.Lock()
 	if ctype == TypeSlaver {
+		if len(name) < 1 {
+			err = fmt.Errorf("name is required for slaver")
+			return
+		}
 		old = m.slavers[name]
 		m.slavers[name] = cid
 	} else if ctype == TypeClient {
+		if len(session) < 1 {
+			err = fmt.Errorf("session is required for client")
+			return
+		}
 		old = m.clients[session]
 		m.clients[session] = cid
 	} else {
@@ -146,6 +163,11 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	if err != nil {
 		return
 	}
+	session := rc.Kvs().StrVal("session")
+	if len(session) < 1 {
+		err = fmt.Errorf("the session is empty, not login?")
+		return
+	}
 	m.slck.Lock()
 	cid := m.slavers[name]
 	m.sidc++
@@ -160,7 +182,6 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		err = fmt.Errorf("the channel is not found by name(%v)", name)
 		return
 	}
-	session := rc.Kvs().StrVal("session")
 	log.D("Master try dial to %v on channel(%v),session(%v)", uri, name, session)
 	res, err := cmdc.Exec_m("dial", util.Map{
 		"uri":  uri,
@@ -449,12 +470,14 @@ func (s *Slaver) Ping(name, data string) (used, slaver int64, err error) {
 //OnConn see ConHandler for detail
 func (s *Slaver) OnConn(con netw.Con) bool {
 	//fmt.Println("master is connected")
+	log.D("Slaver the master is connected")
 	return true
 }
 
 //OnClose see ConHandler for detail
 func (s *Slaver) OnClose(con netw.Con) {
 	//fmt.Println("master is disconnected")
+	log.D("Slaver the master is disconnected")
 }
 
 //OnCmd see ConHandler for detail
@@ -546,7 +569,7 @@ func (c *Channel) Close(sid uint16) (err error) {
 		return
 	}
 	defer session.Close()
-	_, err = c.RM.Exec_m("close", util.Map{
+	_, err = c.RM.Exec_m("/usr/close", util.Map{
 		"sid": sid,
 	})
 	if err == nil {
@@ -558,7 +581,7 @@ func (c *Channel) Close(sid uint16) (err error) {
 }
 
 func (c *Channel) Dial(name, uri string) (sid uint16, err error) {
-	res, err := c.RM.Exec_m("dial", util.Map{
+	res, err := c.RM.Exec_m("/usr/dial", util.Map{
 		"uri":  uri,
 		"name": name,
 	})
@@ -570,7 +593,7 @@ func (c *Channel) Dial(name, uri string) (sid uint16, err error) {
 }
 
 func (c *Channel) List() (res util.Map, err error) {
-	res, err = c.RM.Exec_m("list", util.Map{})
+	res, err = c.RM.Exec_m("/usr/list", util.Map{})
 	return
 }
 
