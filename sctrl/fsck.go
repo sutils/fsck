@@ -664,11 +664,14 @@ func sctrlLogCli(name ...string) {
 	pre := "1"
 	done := make(chan int)
 	switching := false
+	finding := false
 	var runlog = func() {
 		done <- 0
 		fmt.Printf("\n\n------------------ %v ------------------\n", ns)
 		for !switching {
+			finding = true
 			url, last, err = findWebURL(last, true, true, false, delay)
+			finding = false
 			if err != nil { //having error.
 				fmt.Println(err)
 				exitf(1)
@@ -690,6 +693,7 @@ func sctrlLogCli(name ...string) {
 		done <- 1
 	}
 	go runlog()
+	<-done
 	var idxSwitch = func(idx int) {
 		if switching {
 			return
@@ -738,6 +742,9 @@ func sctrlLogCli(name ...string) {
 		if err != nil || bytes.Equal(key, CharTerm) {
 			fmt.Println()
 			break
+		}
+		if finding {
+			continue
 		}
 		if key[0] == 127 { //delete
 			if len(buf) > 0 {
