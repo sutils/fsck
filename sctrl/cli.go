@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -166,6 +167,9 @@ type Terminal struct {
 	NotTaskCallback chan string
 	//
 	closed bool
+	//
+	pings map[string]string
+	pslck sync.RWMutex
 }
 
 func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) *Terminal {
@@ -192,6 +196,9 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 		keyin:   make(chan []byte, 10240),
 		keydone: make(chan int),
 		ctrlc:   make(chan os.Signal, 1),
+		//
+		pings: map[string]string{},
+		pslck: sync.RWMutex{},
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = &WebServer{Mux: term.Mux}
@@ -453,10 +460,18 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			err = srmmapUsage
 			return
 		}
+		delay := time.Second
+		args := SpaceRegex.Split(cmds[1], 2)
+		if len(args) > 1 {
+			val, _ := strconv.Atoi(args[1])
+			if val > 0 {
+				delay = time.Duration(val) * time.Second
+			}
+		}
 		task := NewTask("")
 		task.Selected = t.selected
 		data = task
-		go t.execPingTask(task, cmds[1])
+		go t.execPingTask(task, args[0], delay)
 	case "shelp":
 		fallthrough
 	case "":
@@ -557,7 +572,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	return
 }
 
-func (t *Terminal) execPingTask(task *Task, name string) {
+func (t *Terminal) execPingTask(task *Task, name string, delay time.Duration) {
 	data := "1234567890qwertyuiopasdfghjklzxcvbnm"
 	for {
 		used, call, back, err := t.C.PingSession(name, data)
@@ -571,7 +586,7 @@ func (t *Terminal) execPingTask(task *Task, name string) {
 		if err != nil {
 			break
 		}
-		time.Sleep(time.Second)
+		time.Sleep(delay)
 	}
 	task.Close()
 }
@@ -800,8 +815,37 @@ func (t *Terminal) handleCallback() {
 	}
 }
 
+func (t *Terminal) loopPing(name string, delay time.Duration) {
+	log.Printf("Terminal ping to %v", name)
+	data := "1234567890qwertyuiopasdfghjklzxcvbnm"
+	t.running = true
+	for t.running {
+		used, call, back, err := t.C.PingSession(name, data)
+		t.pslck.Lock()
+		if err != nil {
+			log.Printf("Terminal ping to %v fail with %v", name, err)
+			t.pings[name] = "-1,-1,-1"
+		} else {
+			if used > 100 {
+				log.Printf("Terminal ping to %v with %v,%v,%v", name, time.Duration(used)*time.Millisecond,
+					time.Duration(call)*time.Millisecond, time.Duration(back)*time.Millisecond)
+			}
+			t.pings[name] = fmt.Sprintf("%v,%v,%v", time.Duration(used)*time.Millisecond,
+				time.Duration(call)*time.Millisecond, time.Duration(back)*time.Millisecond)
+		}
+		t.pslck.Unlock()
+		time.Sleep(delay)
+	}
+}
+
 func (t *Terminal) NotifyTitle() {
-	fmt.Fprintf(os.Stdout, "\033]0;%v %v session\a", t.Name, t.ss.Len())
+	pings := []string{}
+	t.pslck.RLock()
+	for name, ps := range t.pings {
+		pings = append(pings, fmt.Sprintf("%v(%v)", name, ps))
+	}
+	t.pslck.RUnlock()
+	fmt.Fprintf(os.Stdout, "\033]0;%v(%v),%v\a", t.Name, t.ss.Len(), strings.Join(pings, ","))
 }
 
 func (t *Terminal) Activate(shell Shell) {
@@ -900,6 +944,13 @@ func (t *Terminal) AddSession(name, uri string, connect bool, env map[string]int
 		go session.Wait()
 	}
 	t.ss.PushBack(session)
+	t.pslck.Lock()
+	_, found := t.pings[host.Channel]
+	if !found {
+		t.pings[host.Channel] = "-1,-1,-1"
+		go t.loopPing(host.Channel, 2*time.Second)
+	}
+	t.pslck.Unlock()
 	return
 }
 
