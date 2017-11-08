@@ -63,12 +63,19 @@ func TestRc(t *testing.T) {
 	// client.R.Login_(token string)
 	//
 	//test ping
-	used, _, err := client.Ping("master", "data")
+	used, slaver, err := client.PingExec("master", "data")
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	fmt.Println("ping to master used ", used)
+	fmt.Println("ping to master used ", used, slaver)
+	//
+	used, slaverCall, slaverBack, err := client.PingSession("master", "data")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	fmt.Println("ping to master used ", used, slaverCall, slaverBack)
 	//
 	session, err := client.DialSession("master", "localhost:9392")
 	if err != nil {
@@ -116,12 +123,12 @@ func TestRc(t *testing.T) {
 	//test error
 	{
 		//test ping to unknow
-		_, _, err = client.Ping("xxxx", "data")
+		_, _, err = client.PingExec("xxxx", "data")
 		if err == nil {
 			t.Error(err)
 			return
 		}
-		_, _, err = client.Ping("", "data")
+		_, _, err = client.PingExec("", "data")
 		if err == nil {
 			t.Error(err)
 			return
@@ -372,7 +379,7 @@ func TestRc(t *testing.T) {
 		runner.Stop()
 		cid := server.clients["xxm"]
 		// fmt.Println("---->")
-		server.Send(TypeSlaver, cid, &mockcmd{}, []byte("abc"))
+		server.Send(110, TypeSlaver, cid, &mockcmd{}, []byte("abc"))
 		//
 	}
 	{ //test slaver handler error
@@ -387,7 +394,7 @@ func TestRc(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		_, _, err = client.Ping("xxm", "xxx")
+		_, _, err = client.PingExec("xxm", "xxx")
 		if err == nil {
 			t.Error(err)
 			return
@@ -398,7 +405,7 @@ func TestRc(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	client.Close()
 	server.Close()
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 }
 
 type mockwriter struct {

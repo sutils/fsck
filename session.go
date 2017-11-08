@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Centny/gwf/log"
+	"github.com/Centny/gwf/util"
 )
 
 var ShowLog int
@@ -23,6 +24,19 @@ var ErrSessionNotFound = fmt.Errorf("-session:not found")
 var ErrSessionClosed = fmt.Errorf("-session:closed")
 
 var OK = "ok"
+
+type ErrOK struct {
+	Data string
+}
+
+func (e *ErrOK) Error() string {
+	return OK
+}
+
+func IsErrOK(err error) bool {
+	_, ok := err.(*ErrOK)
+	return ok
+}
 
 type Session struct {
 	io.ReadWriteCloser
@@ -60,7 +74,7 @@ func (s *Session) Write(p []byte) (n int, err error) {
 	var tempDelay time.Duration
 	for {
 		_, err = s.Out.Write(buf)
-		if err == nil {
+		if err == nil || IsErrOK(err) {
 			break
 		}
 		if err == ErrSessionClosed {
@@ -122,28 +136,50 @@ func (s *Session) Close() (err error) {
 type SessionPool struct {
 	ss  map[uint16]*Session
 	lck sync.RWMutex
+	wg  sync.WaitGroup
 }
 
 func NewSessionPool() *SessionPool {
 	return &SessionPool{
 		ss:  map[uint16]*Session{},
 		lck: sync.RWMutex{},
+		wg:  sync.WaitGroup{},
 	}
 }
 
 func (s *SessionPool) Dail(sid uint16, uri string, out io.Writer) (session *Session, err error) {
-	raw, err := net.Dial("tcp", uri)
-	if err != nil {
-		return
+	var raw io.ReadWriteCloser
+	if uri == "echo" {
+		raw = NewEchoReadWriteCloser()
+	} else {
+		raw, err = net.Dial("tcp", uri)
+		if err != nil {
+			return
+		}
 	}
 	session = s.start(sid, out, raw)
-	go func() {
-		io.Copy(session, raw)
-		session.Close()
-		raw.Close()
-		s.Remove(sid)
-	}()
+	s.wg.Add(1)
+	go s.copy(session, raw)
 	return
+}
+
+func (s *SessionPool) copy(session *Session, raw io.ReadWriteCloser) {
+	buf := make([]byte, 32*1024)
+	var readed int
+	var err error
+	for {
+		readed, err = raw.Read(buf)
+		if err == nil && readed > 0 {
+			_, err = session.Write(buf[0:readed])
+		}
+		if err != nil && !IsErrOK(err) {
+			break
+		}
+	}
+	session.Close()
+	raw.Close()
+	s.Remove(session.SID)
+	s.wg.Done()
 }
 
 func (s *SessionPool) Start(sid uint16, out io.Writer) (session *Session) {
@@ -197,5 +233,103 @@ func (s *SessionPool) Write(p []byte) (n int, err error) {
 		s.Remove(sid)
 		err = ErrSessionClosed
 	}
+	return
+}
+
+func (s *SessionPool) Close() error {
+	s.lck.Lock()
+	for _, ss := range s.ss {
+		ss.Close()
+	}
+	s.lck.Unlock()
+	s.wg.Wait()
+	return nil
+}
+
+type EchoReadWriteCloser struct {
+	pipe chan []byte
+	lck  sync.RWMutex
+}
+
+func NewEchoReadWriteCloser() *EchoReadWriteCloser {
+	return &EchoReadWriteCloser{
+		pipe: make(chan []byte, 1),
+		lck:  sync.RWMutex{},
+	}
+}
+
+func (e *EchoReadWriteCloser) Write(p []byte) (n int, err error) {
+	if e.pipe == nil {
+		err = io.EOF
+		return
+	}
+	n = len(p)
+	e.pipe <- p[:]
+	return
+}
+
+func (e *EchoReadWriteCloser) Read(p []byte) (n int, err error) {
+	if e.pipe == nil {
+		err = io.EOF
+		return
+	}
+	buf := <-e.pipe
+	if buf == nil {
+		err = io.EOF
+		return
+	}
+	n = copy(p, buf)
+	return
+}
+
+func (e *EchoReadWriteCloser) Close() (err error) {
+	e.lck.Lock()
+	if e.pipe != nil {
+		e.pipe <- nil
+		close(e.pipe)
+		e.pipe = nil
+	}
+	e.lck.Unlock()
+	return
+}
+
+type EchoPing struct {
+	S *Session
+}
+
+func NewEchoPing(s *Session) *EchoPing {
+	return &EchoPing{S: s}
+}
+
+func (e *EchoPing) Ping(data string) (used, slaverCall, slaverBack int64, err error) {
+	beg := util.Now()
+	_, err = e.S.Write([]byte(data))
+	if err == nil {
+		err = fmt.Errorf("ping reply err is nil")
+		return
+	}
+	//
+	okerr, ok := err.(*ErrOK)
+	if !ok {
+		return
+	}
+	ms, err := util.Json2Map(okerr.Data)
+	if err != nil {
+		err = fmt.Errorf("parse call reply to map fail with %v", err)
+		return
+	}
+	slaverCall = ms.IntValV("used", -1)
+	//
+	buf := make([]byte, len(data)+64)
+	readed, err := e.S.Read(buf)
+	if err != nil && readed != len(data)+16 {
+		err = fmt.Errorf("ping reply read data fail readed(%v),error(%v)", readed, err)
+		return
+	}
+	buf = buf[readed-16:]
+	slaverBeg := int64(binary.BigEndian.Uint64(buf))
+	slaverEnd := int64(binary.BigEndian.Uint64(buf[8:]))
+	slaverBack = slaverEnd - slaverBeg
+	used = util.Now() - beg
 	return
 }

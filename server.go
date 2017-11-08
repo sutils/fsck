@@ -3,6 +3,7 @@ package fsck
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,6 +72,8 @@ type Master struct {
 	ni2s    map[string]string //mapping <name-sid> to session
 	si2n    map[string]string //mapping <session-sid> to name
 	sidc    uint16
+	//
+	pings map[uint16]int64
 }
 
 func NewMaster() *Master {
@@ -80,6 +83,7 @@ func NewMaster() *Master {
 		clients: map[string]string{},
 		ni2s:    map[string]string{},
 		si2n:    map[string]string{},
+		pings:   map[uint16]int64{},
 	}
 	return srv
 }
@@ -195,6 +199,9 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	m.slck.Lock()
 	m.ni2s[fmt.Sprintf("%v-%v", name, sid)] = session
 	m.si2n[fmt.Sprintf("%v-%v", session, sid)] = name
+	if uri == "echo" {
+		m.pings[sid] = 0
+	}
 	m.slck.Unlock()
 	val = res
 	log.D("Master dial to %v on channel(%v),session(%v) success with sid(%v)", uri, name, session, sid)
@@ -317,14 +324,31 @@ func (m *Master) OnChannelCmd(c netw.Cmd) int {
 	return m.OnClientCmd(c)
 }
 
-func (m *Master) Send(ctype, cid string, c netw.Cmd, data []byte) int {
+func (m *Master) Send(sid uint16, ctype, cid string, c netw.Cmd, data []byte) int {
 	cmdc := m.L.CmdC(cid)
 	if cmdc == nil {
 		log.D("Master transfer data to %v by cid(%v) fail with connect not found", ctype, cid)
 		c.Writeb([]byte(fmt.Sprintf("%v not found by id(%v)", ctype, cid)))
 		return -1
 	}
-	reply, err := cmdc.ExecV(ChannelCmdC, true, data)
+	m.slck.RLock()
+	_, pings := m.pings[sid]
+	m.slck.RUnlock()
+	//
+	var reply []byte
+	var err error
+	if pings {
+		log.D("Master receive ping session(%v) command from %v", sid, c.RemoteAddr())
+		beg := util.Now()
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(beg))
+		reply, err = cmdc.ExecV(ChannelCmdC, true, append(data, buf...))
+		reply = append(reply, []byte(fmt.Sprintf(":%v", util.S2Json(util.Map{
+			"used": util.Now() - beg,
+		})))...)
+	} else {
+		reply, err = cmdc.ExecV(ChannelCmdC, true, data)
+	}
 	if err != nil {
 		c.Writeb([]byte(err.Error()))
 		log.D("Master %v repy error %v", ctype, err)
@@ -347,7 +371,7 @@ func (m *Master) OnSlaverCmd(c netw.Cmd) int {
 		c.Writeb([]byte(ErrSessionNotFound.Error()))
 		return 0
 	}
-	return m.Send(TypeClient, cid, c, data)
+	return m.Send(sid, TypeClient, cid, c, data)
 }
 
 func (m *Master) OnClientCmd(c netw.Cmd) int {
@@ -363,7 +387,7 @@ func (m *Master) OnClientCmd(c netw.Cmd) int {
 		c.Writeb([]byte(ErrSessionNotFound.Error()))
 		return 0
 	}
-	return m.Send(TypeSlaver, cid, c, data)
+	return m.Send(sid, TypeSlaver, cid, c, data)
 }
 
 //OnConn see ConHandler for detail
@@ -466,8 +490,13 @@ func (s *Slaver) List() (res util.Map, err error) {
 	return s.Channel.List()
 }
 
-func (s *Slaver) Ping(name, data string) (used, slaver int64, err error) {
-	used, slaver, err = s.Channel.Ping(name, data)
+func (s *Slaver) PingExec(name, data string) (used, slaver int64, err error) {
+	used, slaver, err = s.Channel.PingExec(name, data)
+	return
+}
+
+func (s *Slaver) PingSession(name, data string) (used, slaverCall, slaverBack int64, err error) {
+	used, slaverCall, slaverBack, err = s.Channel.PingSession(name, data)
 	return
 }
 
@@ -491,25 +520,30 @@ func (s *Slaver) OnCmd(con netw.Cmd) int {
 
 func (s *Slaver) Close() error {
 	s.R.Stop()
+	s.SP.Close()
 	return nil
 }
 
 type Channel struct {
-	Name string
-	BH   *impl.OBDH
-	RC   *impl.RC_Con
-	RM   *impl.RCM_Con
-	RS   *impl.RCM_S
-	SP   *SessionPool
+	Name  string
+	BH    *impl.OBDH
+	RC    *impl.RC_Con
+	RM    *impl.RCM_Con
+	RS    *impl.RCM_S
+	SP    *SessionPool
+	pings map[string]*EchoPing
+	pslck sync.RWMutex
 }
 
 func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S, sp *SessionPool) *Channel {
 	channel := &Channel{
-		BH: bh,
-		RC: rc,
-		RM: rm,
-		RS: rs,
-		SP: sp,
+		BH:    bh,
+		RC:    rc,
+		RM:    rm,
+		RS:    rs,
+		SP:    sp,
+		pings: map[string]*EchoPing{},
+		pslck: sync.RWMutex{},
 	}
 	channel.RS.AddHFunc("dial", channel.DialH)
 	channel.RS.AddHFunc("close", channel.CloseH)
@@ -608,7 +642,7 @@ func (c *Channel) PingH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	return
 }
 
-func (c *Channel) Ping(name, data string) (used, slaver int64, err error) {
+func (c *Channel) PingExec(name, data string) (used, slaver int64, err error) {
 	beg := util.Now()
 	res, err := c.RM.Exec_m("ping", util.Map{
 		"data": data,
@@ -633,7 +667,11 @@ func (c *Channel) Write(p []byte) (n int, err error) {
 		case OK:
 			err = nil
 		default:
-			err = fmt.Errorf(message)
+			if strings.HasPrefix(message, OK+":") {
+				err = &ErrOK{Data: strings.TrimPrefix(message, OK+":")}
+			} else {
+				err = fmt.Errorf(message)
+			}
 		}
 		n = len(p)
 	}
@@ -657,6 +695,24 @@ func (c *Channel) DialSession(name, uri string) (session *Session, err error) {
 	if err == nil {
 		session = c.SP.Start(sid, c)
 		log.D("Channel(%v) dial to %v on channel(%v) success with %v", c.Name, uri, name, sid)
+	}
+	return
+}
+
+func (c *Channel) PingSession(name, data string) (used, slaverCall, slaverBack int64, err error) {
+	c.pslck.Lock()
+	defer c.pslck.Unlock()
+	pings := c.pings[name]
+	if pings == nil {
+		var ss *Session
+		ss, err = c.DialSession(name, "echo")
+		if err == nil {
+			pings = NewEchoPing(ss)
+			c.pings[name] = pings
+		}
+	}
+	if err == nil {
+		used, slaverCall, slaverBack, err = pings.Ping(data)
 	}
 	return
 }
