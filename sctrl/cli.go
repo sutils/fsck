@@ -560,10 +560,11 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 func (t *Terminal) execPingTask(task *Task, name string) {
 	data := "1234567890qwertyuiopasdfghjklzxcvbnm"
 	for {
-		used, slaver, err := t.C.Ping(name, data)
+		used, call, back, err := t.C.PingSession(name, data)
 		if err == nil {
-			_, err = fmt.Fprintf(task, "%v bytes from %v: time=%v slaver=%v\n", len(data), name,
-				time.Duration(used)*time.Millisecond, time.Duration(slaver)*time.Millisecond)
+			_, err = fmt.Fprintf(task, "%v bytes from %v: time=%v slaver=(%v,%v)\n", len(data), name,
+				time.Duration(used)*time.Millisecond, time.Duration(call)*time.Millisecond,
+				time.Duration(back)*time.Millisecond)
 		} else {
 			_, err = fmt.Fprintf(task, "ping to %v fail with %v\n", name, err)
 		}
@@ -679,7 +680,9 @@ func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ..
 		task.Close()
 		return
 	}
+	wg := &sync.WaitGroup{}
 	var execSession = func(session *SshSession, sid string) {
+		defer wg.Done()
 		name := session.Name
 		var err error
 		tcmds := bytes.NewBuffer(nil)
@@ -724,10 +727,12 @@ func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ..
 		session := em.Value.(*SshSession)
 		name := session.Name
 		if len(task.Selected) < 1 || Having(task.Selected, name) {
+			wg.Add(1)
 			sid := fmt.Sprintf("%v-%v", task.ID, name)
-			execSession(session, sid)
+			go execSession(session, sid)
 		}
 	}
+	wg.Wait()
 	if len(task.Subs) < 1 {
 		task.Close()
 	}
