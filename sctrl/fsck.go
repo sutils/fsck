@@ -76,6 +76,7 @@ var webdavAddr string
 var webdavPath string
 var webdavUser string
 var hbdelay int
+var realAddr string
 
 //not alias argument
 var runClient bool
@@ -94,6 +95,7 @@ func regCommonFlags() {
 	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
 	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
 	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
+	flag.StringVar(&realAddr, "realaddr", "", "the real server listen address")
 }
 
 //sctrl-server argument flags
@@ -363,6 +365,7 @@ func main() {
 			printServerUsage(1, alias || name == "sctrl-server")
 		}
 		go sctrlWebdav()
+		go sctrlReal()
 		sctrlServer()
 	case name == "sctrl-cli" || name == "sctrl-client" || mode == "-c":
 		regCommonFlags()
@@ -372,6 +375,7 @@ func main() {
 			printClientUsage(0, alias || name == "sctrl-client")
 		}
 		go sctrlWebdav()
+		go sctrlReal()
 		sctrlClient()
 	case name == "sctrl-sc" || name == "sctrl-slaver" || mode == "-sc":
 		regCommonFlags()
@@ -385,6 +389,7 @@ func main() {
 			exitf(1)
 		}
 		go sctrlWebdav()
+		go sctrlReal()
 		sctrlSlaver()
 	case name == "sctrl-log" || mode == "-lc":
 		for _, arg := range os.Args {
@@ -520,6 +525,8 @@ func sctrlSlaver() {
 	slaver := fsck.NewSlaver("slaver")
 	slaver.HbDelay = int64(hbdelay)
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
+	routing.Shared.HFunc("/real/update", slaver.Channel.Real.UpdateH)
+	routing.Shared.HFunc("/real/show", slaver.Channel.Real.ShowH)
 	wait := make(chan int)
 	<-wait
 	exitf(0)
@@ -619,6 +626,9 @@ func sctrlClient() {
 	logout := NewNamedWriter("debug", terminal.Log)
 	log.SetOutput(logout)
 	gwflog.SetWriter(logout)
+	//
+	routing.Shared.HFunc("/real/update", client.Channel.Real.UpdateH)
+	routing.Shared.HFunc("/real/show", client.Channel.Real.ShowH)
 	//
 	fmt.Printf("start connect to %v\n", serverAddr)
 	err = client.StartClient(serverAddr, util.UUID(), loginToken)
@@ -842,8 +852,21 @@ func sctrlWebdav() {
 	})
 	routing.Shared.Handler("^/dav/.*$", webdav)
 	log.Printf("start webdav server by listen(%v),davpth(%v)", webdavAddr, webdavPath)
-	err := routing.ListenAndServe(webdavAddr)
-	fmt.Println(err)
+	fmt.Println(routing.ListenAndServe(webdavAddr))
+	exitf(1)
+}
+
+func sctrlReal() {
+	if len(realAddr) < 1 {
+		return
+	}
+	log.Printf("start real server by listen(%v)", realAddr)
+	if len(webdavPath) < 1 || realAddr != webdavAddr {
+		fmt.Println(routing.ListenAndServe(realAddr))
+	} else {
+		wait := make(chan int)
+		<-wait
+	}
 	exitf(1)
 }
 

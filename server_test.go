@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Centny/gwf/routing/httptest"
+
 	"github.com/Centny/gwf/netw"
 	"github.com/Centny/gwf/netw/rc"
 	"github.com/Centny/gwf/pool"
@@ -63,12 +65,12 @@ func TestRc(t *testing.T) {
 	// client.R.Login_(token string)
 	//
 	//test ping
-	used, slaver, err := client.PingExec("master", "data")
+	used, slaverCall, err := client.PingExec("master", "data")
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	fmt.Println("ping to master used ", used, slaver)
+	fmt.Println("ping to master used ", used, slaverCall)
 	//
 	used, slaverCall, slaverBack, err := client.PingSession("master", "data")
 	if err != nil {
@@ -76,6 +78,36 @@ func TestRc(t *testing.T) {
 		return
 	}
 	fmt.Println("ping to master used ", used, slaverCall, slaverBack)
+	//
+	//test real log
+	{
+		ts := httptest.NewMuxServer()
+		ts.Mux.HFunc(".*", server.Local.Channel.Real.UpdateH)
+		NotifyReal(ts.URL, util.Map{
+			"x1": util.Map{
+				"a": 1,
+				"b": 1,
+			},
+		})
+		all, err := client.RealLog([]string{"master", "not"}, map[string]int64{
+			"x1": 1000,
+		}, map[string]string{
+			"a": "avg",
+			"b": "sum",
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		hosts := all.MapValP("/master/hosts")
+		alllog := all.MapValP("/master/logs")
+		if len(hosts) != 1 || alllog.IntVal("a") != 1 || alllog.IntVal("b") != 1 {
+			fmt.Println("-->", hosts)
+			fmt.Println("-->", alllog)
+			t.Error("error")
+			return
+		}
+	}
 	//
 	session, err := client.DialSession("master", "localhost:9392")
 	if err != nil {
@@ -93,6 +125,8 @@ func TestRc(t *testing.T) {
 		t.Error("error")
 		return
 	}
+	//
+
 	{
 		//test slaver login not name
 		wait := make(chan error)

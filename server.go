@@ -105,6 +105,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddHFunc("/usr/close", m.CloseH)
 	m.L.AddHFunc("/usr/list", m.ListH)
 	m.L.AddHFunc("/usr/status", m.StatusH)
+	m.L.AddHFunc("/usr/real_log", m.RealLogH)
 	m.L.AddHFunc("ping", m.PingH)
 	err = m.L.Run()
 	return
@@ -188,6 +189,46 @@ func (m *Master) StatusH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 			continue
 		}
 		res, err := cmdc.Exec_m("status", util.Map{})
+		if err != nil {
+			allres[name] = util.Map{
+				"status": err.Error(),
+			}
+		} else {
+			res["status"] = "ok"
+			allres[name] = res
+		}
+	}
+	val = allres
+	return
+}
+
+func (m *Master) RealLogH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	var ns []string
+	err = rc.ValidF(`
+		name,R|S,L:0;
+		`, &ns)
+	if err != nil {
+		return
+	}
+	m.slck.RLock()
+	cids := map[string]string{}
+	for _, name := range ns {
+		cid := m.slavers[name]
+		if len(cid) > 0 {
+			cids[name] = cid
+		}
+	}
+	m.slck.RUnlock()
+	allres := util.Map{}
+	for name, cid := range cids {
+		cmdc := m.L.CmdC(cid)
+		if cmdc == nil {
+			allres[name] = util.Map{
+				"status": "offline",
+			}
+			continue
+		}
+		res, err := cmdc.Exec_m("real_log", *rc.Map)
 		if err != nil {
 			allres[name] = util.Map{
 				"status": err.Error(),
@@ -549,6 +590,11 @@ func (s *Slaver) Status(name ...string) (status util.Map, err error) {
 	return
 }
 
+func (s *Slaver) RealLog(name []string, ns map[string]int64, keys map[string]string) (all util.Map, err error) {
+	all, err = s.Channel.RealLog(name, ns, keys)
+	return
+}
+
 //OnConn see ConHandler for detail
 func (s *Slaver) OnConn(con netw.Con) bool {
 	//fmt.Println("master is connected")
@@ -583,6 +629,7 @@ type Channel struct {
 	M     *tutil.Monitor
 	pings map[string]*EchoPing
 	pslck sync.RWMutex
+	Real  *RealTime
 }
 
 func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S, sp *SessionPool) *Channel {
@@ -595,11 +642,13 @@ func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S
 		M:     tutil.NewMonitor(),
 		pings: map[string]*EchoPing{},
 		pslck: sync.RWMutex{},
+		Real:  NewRealTime(),
 	}
 	channel.RS.AddHFunc("status", channel.StatusH)
 	channel.RS.AddHFunc("dial", channel.DialH)
 	channel.RS.AddHFunc("close", channel.CloseH)
 	channel.RS.AddHFunc("ping", channel.PingH)
+	channel.RS.AddHFunc("real_log", channel.RealLogH)
 	channel.BH.AddF(ChannelCmdC, channel.OnMasterCmd)
 	return channel
 }
@@ -789,6 +838,31 @@ func (c *Channel) StatusH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 func (c *Channel) Status(name ...string) (status util.Map, err error) {
 	status, err = c.RM.Exec_m("/usr/status", util.Map{
 		"name": strings.Join(name, ","),
+	})
+	return
+}
+
+func (c *Channel) RealLogH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	keys := map[string]string{}
+	keysm := rc.MapVal("keys")
+	for key := range keysm {
+		keys[key] = keysm.StrVal(key)
+	}
+	ns := map[string]int64{}
+	nsm := rc.MapVal("ns")
+	for n := range nsm {
+		ns[n] = nsm.IntVal(n)
+	}
+	hosts, alllog := c.Real.MergeLog(ns, keys)
+	val = util.Map{"hosts": hosts, "logs": alllog}
+	return
+}
+
+func (c *Channel) RealLog(name []string, ns map[string]int64, keys map[string]string) (all util.Map, err error) {
+	all, err = c.RM.Exec_m("/usr/real_log", util.Map{
+		"name": strings.Join(name, ","),
+		"ns":   ns,
+		"keys": keys,
 	})
 	return
 }
