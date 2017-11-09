@@ -839,7 +839,7 @@ func sctrlWebdav() {
 			}
 		},
 	}
-	routing.Shared.HFilterFunc("^/.*$", func(hs *routing.HTTPSession) routing.HResult {
+	routing.Shared.HFilterFunc("^/dav/.*$", func(hs *routing.HTTPSession) routing.HResult {
 		if len(webdavUser) > 0 {
 			usr, pwd, ok := hs.R.BasicAuth()
 			if !ok || fmt.Sprintf("%v:%v", usr, pwd) != webdavUser {

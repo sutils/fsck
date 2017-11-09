@@ -494,9 +494,12 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		ns := map[string]int64{}
 		keys := map[string]string{}
 		name := ""
+		clear := 0
 		for idx, arg := range args {
 			if idx == 0 {
 				name = arg
+			} else if strings.HasPrefix(arg, "-clear") {
+				clear = 1
 			} else if strings.HasPrefix(arg, "-host=") {
 				parts := strings.Split(strings.TrimPrefix(arg, "-host="), ",")
 				for _, part := range parts {
@@ -518,14 +521,14 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		for n := range ns {
 			ns[n] = timeout * 1000
 		}
-		if delay < 1 {
+		if delay < 1 || clear > 0 {
 			delay = 0
 		}
 		//
 		task := NewTask("")
 		task.Selected = t.selected
 		data = task
-		go t.execRealTask(task, name, ns, keys, time.Duration(delay)*time.Second)
+		go t.execRealTask(task, name, ns, keys, clear, time.Duration(delay)*time.Second)
 	case "sping":
 		if len(cmds) < 2 {
 			err = srmmapUsage
@@ -643,9 +646,9 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 	return
 }
 
-func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, keys map[string]string, delay time.Duration) {
+func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, keys map[string]string, clear int, delay time.Duration) {
 	for {
-		allres, err := t.C.RealLog([]string{name}, ns, keys)
+		allres, err := t.C.RealLog([]string{name}, ns, keys, clear)
 		if err == nil {
 			res := allres.MapVal(name)
 			logs := res.MapVal("logs")
@@ -657,16 +660,18 @@ func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, ke
 				}
 			}
 			fmt.Fprintf(task, "->Slaver %v %v hosts -> %v\n", name, len(hosts), res.Val("status"))
-			vals := []string{}
-			for key, val := range logs {
-				vals = append(vals, fmt.Sprintf("%v:%v", key, val))
+			if len(logs) > 0 {
+				vals := []string{}
+				for key, val := range logs {
+					vals = append(vals, fmt.Sprintf("%v:%v", key, val))
+				}
+				sort.Sort(util.NewStringSorter(vals))
+				buf := ColumnBytes(" ", vals...)
+				buf.WriteTo(task)
+				_, err = fmt.Fprintf(task, "\n\n")
 			}
-			sort.Sort(util.NewStringSorter(vals))
-			buf := ColumnBytes(" ", vals...)
-			buf.WriteTo(task)
-			_, err = fmt.Fprintf(task, "\n\n")
 		} else {
-			_, err = fmt.Fprintf(task, "->Slaver %v -> %v\n\n", name, err)
+			_, err = fmt.Fprintf(task, "->Slaver %v -> %v\n", name, err)
 		}
 		if err != nil || delay < 1 {
 			break

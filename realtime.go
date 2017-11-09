@@ -99,6 +99,12 @@ func (r *RealTime) MergeLog(ns map[string]int64, keys map[string]string) (hosts,
 	return
 }
 
+func (r *RealTime) Clear() {
+	r.lck.Lock()
+	r.ls = map[string]*RealLog{}
+	r.lck.Unlock()
+}
+
 func NotifyReal(url string, data util.Map) (res util.Map, err error) {
 	_, res, err = util.HPostN2(url, "application/json;charset=utf8", bytes.NewBufferString(util.S2Json(data)))
 	return

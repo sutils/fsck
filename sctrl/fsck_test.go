@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
 )
 
@@ -125,7 +126,9 @@ func TestMain(t *testing.T) {
 		webdavPath = "test"
 		webdavAddr = ":9235"
 		webdavUser = "test:1234"
+		realAddr = ":9235"
 		go sctrlWebdav()
+		go sctrlReal()
 		sctrlSlaver()
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -183,7 +186,7 @@ func TestMain(t *testing.T) {
 		time.Sleep(3 * time.Second)
 		rkinputCli <- CharTerm
 		rkinputCli <- CharTerm
-		time.Sleep(time.Second)
+		time.Sleep(2 * time.Second)
 	}
 	{
 		fmt.Println("testing kill---->")
@@ -474,6 +477,30 @@ func TestMain(t *testing.T) {
 		}
 	}
 	{
+		fmt.Println("testing sreal---->")
+		_, err = fsck.NotifyReal("http://localhost:9235/real/update", util.Map{
+			"c1": util.Map{
+				"abcdefg": 1,
+				"y":       1,
+				"z":       1,
+			},
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		rkinputCli <- []byte("sreal test abcdefg y z=avg -timeout=1 -delay=1 -host=c1\n")
+		time.Sleep(3 * time.Second)
+		rkinputCli <- CharTerm
+		rkinputCli <- CharTerm
+		time.Sleep(time.Second)
+		rkinputCli <- []byte("sreal test -clear\n")
+		time.Sleep(3 * time.Second)
+		rkinputCli <- CharTerm
+		rkinputCli <- CharTerm
+		time.Sleep(time.Second)
+	}
+	{
 		fmt.Println("testing switch---->")
 		rkinputCli <- KeyF1
 		writekey("sadd loc2 root:sco@loc.m")
@@ -674,6 +701,12 @@ func TestMain(t *testing.T) {
 		}
 		//
 		writekey("sexec sterm")
+		if m := <-back; m == "0" {
+			t.Error(m)
+			return
+		}
+		//
+		writekey("sreal")
 		if m := <-back; m == "0" {
 			t.Error(m)
 			return

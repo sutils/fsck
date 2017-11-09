@@ -94,7 +94,7 @@ func TestRc(t *testing.T) {
 		}, map[string]string{
 			"a": "avg",
 			"b": "sum",
-		})
+		}, 0)
 		if err != nil {
 			t.Error(err)
 			return
@@ -107,6 +107,12 @@ func TestRc(t *testing.T) {
 			t.Error("error")
 			return
 		}
+		client.RealLog([]string{"master", "not"}, map[string]int64{
+			"x1": 1000,
+		}, map[string]string{
+			"a": "avg",
+			"b": "sum",
+		}, 1)
 	}
 	//
 	session, err := client.DialSession("master", "localhost:9392")

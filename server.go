@@ -593,8 +593,8 @@ func (s *Slaver) Status(name ...string) (status util.Map, err error) {
 	return
 }
 
-func (s *Slaver) RealLog(name []string, ns map[string]int64, keys map[string]string) (all util.Map, err error) {
-	all, err = s.Channel.RealLog(name, ns, keys)
+func (s *Slaver) RealLog(name []string, ns map[string]int64, keys map[string]string, clear int) (all util.Map, err error) {
+	all, err = s.Channel.RealLog(name, ns, keys, clear)
 	return
 }
 
@@ -846,6 +846,9 @@ func (c *Channel) Status(name ...string) (status util.Map, err error) {
 }
 
 func (c *Channel) RealLogH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	if rc.IntVal("clear") == 1 {
+		c.Real.Clear()
+	}
 	keys := map[string]string{}
 	keysm := rc.MapVal("keys")
 	for key := range keysm {
@@ -861,11 +864,12 @@ func (c *Channel) RealLogH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	return
 }
 
-func (c *Channel) RealLog(name []string, ns map[string]int64, keys map[string]string) (all util.Map, err error) {
+func (c *Channel) RealLog(name []string, ns map[string]int64, keys map[string]string, clear int) (all util.Map, err error) {
 	all, err = c.RM.Exec_m("/usr/real_log", util.Map{
-		"name": strings.Join(name, ","),
-		"ns":   ns,
-		"keys": keys,
+		"name":  strings.Join(name, ","),
+		"ns":    ns,
+		"keys":  keys,
+		"clear": clear,
 	})
 	return
 }
