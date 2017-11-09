@@ -77,8 +77,8 @@ func (r *RealTime) MergeLog(ns map[string]int64, keys map[string]string) (hosts,
 	alllog = util.Map{}
 	hostc := 0
 	for name, log := range r.ls {
-		timeout, ok := ns[name]
-		if (ok && now-log.Last > timeout) || now-log.Last > 2000 {
+		timeout := ns[name]
+		if timeout > 0 && now-log.Last > timeout {
 			hosts[name] = "offline"
 			continue
 		}
@@ -89,9 +89,11 @@ func (r *RealTime) MergeLog(ns map[string]int64, keys map[string]string) (hosts,
 		hostc++
 	}
 	r.lck.Unlock()
-	for key, val := range keys {
-		if val != "sum" {
-			alllog.SetVal(key, alllog.FloatVal(key)/float64(hostc))
+	if hostc > 0 {
+		for key, val := range keys {
+			if val != "sum" {
+				alllog.SetVal(key, alllog.FloatVal(key)/float64(hostc))
+			}
 		}
 	}
 	return

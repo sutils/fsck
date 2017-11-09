@@ -4,7 +4,7 @@ windows:
     root: $GOPATH/src/github.com/sutils/fsck/sctrl
     panes:
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -s -token abc
-      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -sc -master localhost:9234 -auth abc -name test
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -sc -master localhost:9234 -auth abc -name test -realaddr :9235
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl-ssh.sh loc
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -lc debug
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -lc allhost

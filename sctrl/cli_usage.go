@@ -112,6 +112,22 @@ var sslaverUsage = NewUsage("Sctrl sslaver version %v\n", Version).
 	Append("Usage: sslaver <name> <name1>\n").
 	Append("       sslaver test\n")
 
+var srealUsage = NewUsage("Sctrl sreal version %v\n", Version).
+	Append("       sreal will show the realtime log\n").
+	Append("Usage: sreal <slaver1,slaver2> [-host=<host1,host2>] [-timeout=2] field1=avg field2=sum\n").
+	Append("       sreal slaver1 -host=h1,h2,h3 avg1=avg sum1=sum\n").
+	Append("Options:\n").
+	Append("  slave\n").
+	Append("       the slaver name\n").
+	Append("  host\n").
+	Append("       the client name\n").
+	Append("  timeout\n").
+	Append("       the data timeout of notify log data\n").
+	Append("  field=avg\n").
+	Append("       get the avg value of field from all host\n").
+	Append("  field=sum\n").
+	Append("       get the sum value of field from all host\n")
+
 var spingUsage = NewUsage("Sctrl ping version %v\n", Version).
 	Append("       sping will ping to remote slaver and return the delay\n").
 	Append("Usage: sping <host name>\n").

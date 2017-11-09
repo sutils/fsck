@@ -16,3 +16,6 @@ ln -s $GOPATH/src/github.com/sutils/fsck/sctrl/sctrl-scp.sh $GOPATH/bin/sctrl-sc
 chmod +x $GOPATH/bin/sctrl-ssh $GOPATH/bin/sctrl-scp
 ln -s $GOPATH/bin/sctrl $GOPATH/bin/sctrl-profile
 ```
+
+
+curl -l -H "Content-type: application/json" -X POST -d '{"c1":{"a":1,"b":1},"c2":{"a":1,"b":1}}' http://localhost:9235/real/update

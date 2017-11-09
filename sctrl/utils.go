@@ -145,7 +145,7 @@ func MarshalAll(v interface{}) string {
 	return string(bys)
 }
 
-func ColumnBytes(vals ...string) (buf *bytes.Buffer) {
+func ColumnBytes(prefix string, vals ...string) (buf *bytes.Buffer) {
 	max := make([]int, 5)
 	for idx, n := range vals {
 		idx = idx % 5
@@ -154,17 +154,18 @@ func ColumnBytes(vals ...string) (buf *bytes.Buffer) {
 		}
 	}
 	buf = bytes.NewBuffer(nil)
+	fmt.Fprintf(buf, prefix)
 	for idx, n := range vals {
-		fmt.Fprintf(buf, fmt.Sprintf(" %%%vs  ", max[idx%5]), n)
+		fmt.Fprintf(buf, fmt.Sprintf("%v%%%vs  ", prefix, max[idx%5]), n)
 		if idx > 0 && idx%5 == 0 {
-			fmt.Fprintln(buf)
+			fmt.Fprintf(buf, "\n%v", prefix)
 		}
 	}
 	return
 }
 
 func WriteColumn(w io.Writer, vals ...string) (n int64, err error) {
-	buf := ColumnBytes(vals...)
+	buf := ColumnBytes(" ", vals...)
 	n, err = buf.WriteTo(w)
 	return
 }

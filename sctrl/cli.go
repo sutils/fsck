@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -220,6 +221,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 	fmt.Fprintf(prefix, "alias slsmap='%v/sctrl -run slsmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias smaster='%v/sctrl -run smaster'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sslaver='%v/sctrl -run sslaver'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sreal='%v/sctrl -run sreal'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sprofile='%v/sctrl -run profile'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sscp='%v/sctrl-scp'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sping='%v/sctrl -run sping'\n", webcmd)
@@ -482,6 +484,48 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			}
 			data = buf.Bytes()
 		}
+	case "sreal":
+		if len(cmds) < 2 {
+			err = srealUsage
+			return
+		}
+		args := SpaceRegex.Split(cmds[1], -1)
+		var timeout, delay int64 = 0, 2
+		ns := map[string]int64{}
+		keys := map[string]string{}
+		name := ""
+		for idx, arg := range args {
+			if idx == 0 {
+				name = arg
+			} else if strings.HasPrefix(arg, "-host=") {
+				parts := strings.Split(strings.TrimPrefix(arg, "-host="), ",")
+				for _, part := range parts {
+					ns[part] = 0
+				}
+			} else if strings.HasPrefix(arg, "-timeout=") {
+				timeout, _ = strconv.ParseInt(strings.TrimPrefix(arg, "-timeout="), 10, 64)
+			} else if strings.HasPrefix(arg, "-delay=") {
+				delay, _ = strconv.ParseInt(strings.TrimPrefix(arg, "-delay="), 10, 64)
+			} else {
+				parts := strings.SplitN(arg, "=", 2)
+				if len(parts) > 1 {
+					keys[parts[0]] = parts[1]
+				} else {
+					keys[parts[0]] = "sum"
+				}
+			}
+		}
+		for n := range ns {
+			ns[n] = timeout * 1000
+		}
+		if delay < 1 {
+			delay = 0
+		}
+		//
+		task := NewTask("")
+		task.Selected = t.selected
+		data = task
+		go t.execRealTask(task, name, ns, keys, time.Duration(delay)*time.Second)
 	case "sping":
 		if len(cmds) < 2 {
 			err = srmmapUsage
@@ -597,6 +641,39 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		err = fmt.Errorf("-error: command %v not found", line)
 	}
 	return
+}
+
+func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, keys map[string]string, delay time.Duration) {
+	for {
+		allres, err := t.C.RealLog([]string{name}, ns, keys)
+		if err == nil {
+			res := allres.MapVal(name)
+			logs := res.MapVal("logs")
+			hosts := res.MapVal("hosts")
+			max := len("status")
+			for key := range logs {
+				if len(key) > max {
+					max = len(key)
+				}
+			}
+			fmt.Fprintf(task, "->Slaver %v %v hosts -> %v\n", name, len(hosts), res.Val("status"))
+			vals := []string{}
+			for key, val := range logs {
+				vals = append(vals, fmt.Sprintf("%v:%v", key, val))
+			}
+			sort.Sort(util.NewStringSorter(vals))
+			buf := ColumnBytes(" ", vals...)
+			buf.WriteTo(task)
+			_, err = fmt.Fprintf(task, "\n\n")
+		} else {
+			_, err = fmt.Fprintf(task, "->Slaver %v -> %v\n\n", name, err)
+		}
+		if err != nil || delay < 1 {
+			break
+		}
+		time.Sleep(delay)
+	}
+	task.Close()
 }
 
 func (t *Terminal) execPingTask(task *Task, name string, delay time.Duration) {
