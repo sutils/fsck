@@ -521,12 +521,14 @@ type Slaver struct {
 	HbDelay int64
 	Auto    *rc.AutoLoginH
 	OnLogin func(a *rc.AutoLoginH, err error)
+	Real    *RealTime
 }
 
 func NewSlaver(alias string) *Slaver {
 	return &Slaver{
 		Alias: alias,
 		SP:    NewSessionPool(),
+		Real:  NewRealTime(),
 	}
 }
 
@@ -553,6 +555,7 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	s.R.Name = s.Alias
 	auto.Runner = s.R
 	s.Channel = NewChannel(s.R.RCBH, s.R.RCM_Con.RC_Con, s.R.RCM_Con, s.R.RCM_S, s.SP)
+	s.Channel.Real = s.Real
 	s.Channel.Name = ctype
 	s.R.Start()
 	if s.HbDelay > 0 {

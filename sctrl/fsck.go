@@ -525,8 +525,8 @@ func sctrlSlaver() {
 	slaver := fsck.NewSlaver("slaver")
 	slaver.HbDelay = int64(hbdelay)
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
-	routing.Shared.HFunc("/real/update", slaver.Channel.Real.UpdateH)
-	routing.Shared.HFunc("/real/show", slaver.Channel.Real.ShowH)
+	routing.Shared.HFunc("/real/update", slaver.Real.UpdateH)
+	routing.Shared.HFunc("/real/show", slaver.Real.ShowH)
 	wait := make(chan int)
 	<-wait
 	exitf(0)
@@ -627,8 +627,8 @@ func sctrlClient() {
 	log.SetOutput(logout)
 	gwflog.SetWriter(logout)
 	//
-	routing.Shared.HFunc("/real/update", client.Channel.Real.UpdateH)
-	routing.Shared.HFunc("/real/show", client.Channel.Real.ShowH)
+	routing.Shared.HFunc("/real/update", client.Real.UpdateH)
+	routing.Shared.HFunc("/real/show", client.Real.ShowH)
 	//
 	fmt.Printf("start connect to %v\n", serverAddr)
 	err = client.StartClient(serverAddr, util.UUID(), loginToken)
