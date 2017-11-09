@@ -107,6 +107,11 @@ var smasterUsage = NewUsage("Sctrl smaster version %v\n", Version).
 	Append("       smaster will show the master status\n").
 	Append("Usage: smaster\n")
 
+var sslaverUsage = NewUsage("Sctrl sslaver version %v\n", Version).
+	Append("       sslaver will show the slaver status\n").
+	Append("Usage: sslaver <name> <name1>\n").
+	Append("       sslaver test\n")
+
 var spingUsage = NewUsage("Sctrl ping version %v\n", Version).
 	Append("       sping will ping to remote slaver and return the delay\n").
 	Append("Usage: sping <host name>\n").

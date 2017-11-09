@@ -335,6 +335,12 @@ func TestRc(t *testing.T) {
 		t.Error(res)
 		return
 	}
+	res, err = client.Status("master")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	fmt.Println(util.S2Json(res))
 	{
 		//test session is empty
 		for _, c := range server.Master.L.CmdCs() {

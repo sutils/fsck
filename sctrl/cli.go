@@ -219,6 +219,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 	fmt.Fprintf(prefix, "alias srmmap='%v/sctrl -run srmmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias slsmap='%v/sctrl -run slsmap'\n", webcmd)
 	fmt.Fprintf(prefix, "alias smaster='%v/sctrl -run smaster'\n", webcmd)
+	fmt.Fprintf(prefix, "alias sslaver='%v/sctrl -run sslaver'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sprofile='%v/sctrl -run profile'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sscp='%v/sctrl-scp'\n", webcmd)
 	fmt.Fprintf(prefix, "alias sping='%v/sctrl -run sping'\n", webcmd)
@@ -455,6 +456,32 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			data = buf.Bytes()
 		}
 		return
+	case "sslaver":
+		if len(cmds) < 2 {
+			err = sslaverUsage
+			return
+		}
+		args := SpaceRegex.Split(cmds[1], -1)
+		var allres util.Map
+		allres, err = t.C.Status(args...)
+		if err == nil {
+			buf := bytes.NewBuffer(nil)
+			for name := range allres {
+				res := allres.MapVal(name)
+				fmt.Fprintf(buf, "Slaver %v: %v\n", name, res.Val("status"))
+				pending := res.MapVal("pending")
+				if pending != nil {
+					fmt.Fprintf(buf, "  %-10s -> %v\n", "pending", len(pending))
+				}
+				used := res.AryMapVal("used")
+				for _, action := range used {
+					fmt.Fprintf(buf, "  %-10s -> avg:%-3d max:%-5d count:%-4d\n", action.StrVal("name"),
+						action.IntVal("avg"), action.IntVal("max"), action.IntVal("count"))
+				}
+				fmt.Fprintf(buf, "\n")
+			}
+			data = buf.Bytes()
+		}
 	case "sping":
 		if len(cmds) < 2 {
 			err = srmmapUsage

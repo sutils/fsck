@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Centny/gwf/tutil"
+
 	"github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/netw"
 	"github.com/Centny/gwf/netw/impl"
@@ -101,6 +103,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddHFunc("/usr/dial", m.DailH)
 	m.L.AddHFunc("/usr/close", m.CloseH)
 	m.L.AddHFunc("/usr/list", m.ListH)
+	m.L.AddHFunc("/usr/status", m.StatusH)
 	m.L.AddHFunc("ping", m.PingH)
 	err = m.L.Run()
 	return
@@ -154,6 +157,46 @@ func (m *Master) OnLogin(rc *impl.RCM_Cmd, token string) (cid string, err error)
 	} else {
 		log.D("Master accept client connect by session(%v) from %v", session, rc.RemoteAddr())
 	}
+	return
+}
+
+func (m *Master) StatusH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	var ns []string
+	err = rc.ValidF(`
+		name,R|S,L:0;
+		`, &ns)
+	if err != nil {
+		return
+	}
+	m.slck.RLock()
+	cids := map[string]string{}
+	for _, name := range ns {
+		cid := m.slavers[name]
+		if len(cid) > 0 {
+			cids[name] = cid
+		}
+	}
+	m.slck.RUnlock()
+	allres := util.Map{}
+	for name, cid := range cids {
+		cmdc := m.L.CmdC(cid)
+		if cmdc == nil {
+			allres[name] = util.Map{
+				"status": "offline",
+			}
+			continue
+		}
+		res, err := cmdc.Exec_m("status", util.Map{})
+		if err != nil {
+			allres[name] = util.Map{
+				"status": err.Error(),
+			}
+		} else {
+			res["status"] = "ok"
+			allres[name] = res
+		}
+	}
+	val = allres
 	return
 }
 
@@ -500,6 +543,11 @@ func (s *Slaver) PingSession(name, data string) (used, slaverCall, slaverBack in
 	return
 }
 
+func (s *Slaver) Status(name ...string) (status util.Map, err error) {
+	status, err = s.Channel.Status(name...)
+	return
+}
+
 //OnConn see ConHandler for detail
 func (s *Slaver) OnConn(con netw.Con) bool {
 	//fmt.Println("master is connected")
@@ -531,6 +579,7 @@ type Channel struct {
 	RM    *impl.RCM_Con
 	RS    *impl.RCM_S
 	SP    *SessionPool
+	M     *tutil.Monitor
 	pings map[string]*EchoPing
 	pslck sync.RWMutex
 }
@@ -542,9 +591,11 @@ func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S
 		RM:    rm,
 		RS:    rs,
 		SP:    sp,
+		M:     tutil.NewMonitor(),
 		pings: map[string]*EchoPing{},
 		pslck: sync.RWMutex{},
 	}
+	channel.RS.AddHFunc("status", channel.StatusH)
 	channel.RS.AddHFunc("dial", channel.DialH)
 	channel.RS.AddHFunc("close", channel.CloseH)
 	channel.RS.AddHFunc("ping", channel.PingH)
@@ -553,6 +604,7 @@ func NewChannel(bh *impl.OBDH, rc *impl.RC_Con, rm *impl.RCM_Con, rs *impl.RCM_S
 }
 
 func (c *Channel) ExecBytes(args []byte) (reply []byte, err error) {
+	defer c.M.Done(c.M.Start("exec_bytes"))
 	reply, err = c.RC.ExecV(ChannelCmdS, true, args)
 	return
 }
@@ -567,6 +619,7 @@ func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	if err != nil {
 		return
 	}
+	defer c.M.Done(c.M.Start("dail"))
 	session, err := c.SP.Dail(sid, uri, c)
 	if err != nil {
 		return
@@ -587,6 +640,7 @@ func (c *Channel) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	if err != nil {
 		return
 	}
+	defer c.M.Done(c.M.Start("close"))
 	session := c.SP.Remove(sid)
 	if session == nil {
 		err = fmt.Errorf("session(%v) is not found", sid)
@@ -679,6 +733,7 @@ func (c *Channel) Write(p []byte) (n int, err error) {
 }
 
 func (c *Channel) OnMasterCmd(cmd netw.Cmd) int {
+	defer c.M.Done(c.M.Start("master_cmd"))
 	data := cmd.Data()
 	// log.D("Channel receive %v data from %v", len(data), cmd.RemoteAddr())
 	_, err := c.SP.Write(data)
@@ -714,5 +769,17 @@ func (c *Channel) PingSession(name, data string) (used, slaverCall, slaverBack i
 	if err == nil {
 		used, slaverCall, slaverBack, err = pings.Ping(data)
 	}
+	return
+}
+
+func (c *Channel) StatusH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+	val, err = c.M.State()
+	return
+}
+
+func (c *Channel) Status(name ...string) (status util.Map, err error) {
+	status, err = c.RM.Exec_m("/usr/status", util.Map{
+		"name": strings.Join(name, ","),
+	})
 	return
 }
