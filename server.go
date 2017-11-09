@@ -3,6 +3,7 @@ package fsck
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -758,16 +759,24 @@ func (c *Channel) PingSession(name, data string) (used, slaverCall, slaverBack i
 	c.pslck.Lock()
 	defer c.pslck.Unlock()
 	pings := c.pings[name]
-	if pings == nil {
-		var ss *Session
-		ss, err = c.DialSession(name, "echo")
-		if err == nil {
-			pings = NewEchoPing(ss)
-			c.pings[name] = pings
+	for i := 0; i < 3; i++ {
+		if pings == nil {
+			var ss *Session
+			ss, err = c.DialSession(name, "echo")
+			if err == nil {
+				pings = NewEchoPing(ss)
+				c.pings[name] = pings
+			}
 		}
-	}
-	if err == nil {
-		used, slaverCall, slaverBack, err = pings.Ping(data)
+		if err == nil {
+			used, slaverCall, slaverBack, err = pings.Ping(data)
+			if err == io.EOF {
+				c.pings[name] = nil
+				continue
+			} else {
+				break
+			}
+		}
 	}
 	return
 }
