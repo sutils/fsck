@@ -477,6 +477,14 @@ func TestMain(t *testing.T) {
 		}
 	}
 	{
+		fmt.Println("testing sslaver---->")
+		writekey("sslaver test")
+		if m := <-back; m != "0" {
+			t.Error(m)
+			return
+		}
+	}
+	{
 		fmt.Println("testing sreal---->")
 		_, err = fsck.NotifyReal("http://localhost:9235/real/update", util.Map{
 			"c1": util.Map{
@@ -707,6 +715,12 @@ func TestMain(t *testing.T) {
 		}
 		//
 		writekey("sreal")
+		if m := <-back; m == "0" {
+			t.Error(m)
+			return
+		}
+		//
+		writekey("sslaver")
 		if m := <-back; m == "0" {
 			t.Error(m)
 			return
