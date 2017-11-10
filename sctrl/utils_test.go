@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"testing"
 )
 
@@ -97,4 +98,11 @@ func TestJoinArgs(t *testing.T) {
 		t.Error("erro")
 		return
 	}
+}
+
+func TestColumnBytes(t *testing.T) {
+	vals := []string{"Avg:19865", "Done:3.979668e+06", "Errc:6878",
+		"Fullc:0", "Max:76246", "PerAvg:0", "PerMax:0", "Running:19009",
+		"TPS:14375", "Timeout:1.978653e+06", "Used:286666"}
+	WriteColumn(os.Stdout, vals...)
 }

@@ -650,6 +650,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 }
 
 func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, keys map[string]string, clear int, delay time.Duration) {
+	colmax := make([]int, 5)
 	for {
 		allres, err := t.C.RealLog([]string{name}, ns, keys, clear)
 		if err == nil {
@@ -669,7 +670,7 @@ func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, ke
 					vals = append(vals, fmt.Sprintf("%v:%v", key, val))
 				}
 				sort.Sort(util.NewStringSorter(vals))
-				buf := ColumnBytes(" ", vals...)
+				buf := ColumnBytes(" ", colmax, vals...)
 				buf.WriteTo(task)
 				_, err = fmt.Fprintf(task, "\n\n")
 			}
