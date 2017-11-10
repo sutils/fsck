@@ -128,10 +128,17 @@ var srealUsage = NewUsage("Sctrl sreal version %v\n", Version).
 	Append("  field=sum\n").
 	Append("       get the sum value of field from all host\n")
 
-var spingUsage = NewUsage("Sctrl ping version %v\n", Version).
+var spingUsage = NewUsage("Sctrl sping version %v\n", Version).
 	Append("       sping will ping to remote slaver and return the delay\n").
 	Append("Usage: sping <host name>\n").
 	Append("       sping host1\n")
+
+var sscpUsage = NewUsage("Sctrl sscp version %v\n", Version).
+	Append("       copy the file or folder to remote or copy remote file/folder to local\n").
+	Append("Usage: sscp <source> <destination>\n").
+	Append("       sscp ./local1.txt host1:/tmp/\n").
+	Append("       sscp ./dir1 host1:/tmp/\n").
+	Append("       sscp  host1:/tmp/xx/ ./\n")
 
 var shelpUsage = NewUsage("Sctrl version %v\n", Version).
 	Append("       sctrl console is helpful tool to manager multi host in inner network.\n").
@@ -148,4 +155,5 @@ var shelpUsage = NewUsage("Sctrl version %v\n", Version).
 	Append("\n%v\n", smasterUsage).
 	Append("\n%v\n", sslaverUsage).
 	Append("\n%v\n", srealUsage).
+	Append("\n%v\n", sscpUsage).
 	Append("\n%v\n", spingUsage)
