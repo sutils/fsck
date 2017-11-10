@@ -144,4 +144,8 @@ var shelpUsage = NewUsage("Sctrl version %v\n", Version).
 	Append("\n%v\n", sevalUsage).
 	Append("\n%v\n", saddmapUsage).
 	Append("\n%v\n", srmmapUsage).
-	Append("\n%v\n", smasterUsage)
+	Append("\n%v\n", slsmapUsage).
+	Append("\n%v\n", smasterUsage).
+	Append("\n%v\n", sslaverUsage).
+	Append("\n%v\n", srealUsage).
+	Append("\n%v\n", spingUsage)
