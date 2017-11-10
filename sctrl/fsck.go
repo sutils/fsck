@@ -505,7 +505,12 @@ func sctrlServer() {
 	//
 	tokens := map[string]int{}
 	for _, token := range tokenList {
-		tokens[token] = 1
+		parts := strings.SplitN(token, "=", 2)
+		if len(parts) < 2 {
+			tokens[parts[0]] = 1
+		} else {
+			tokens[parts[0]], _ = strconv.Atoi(parts[1])
+		}
 	}
 	server = fsck.NewServer()
 	server.HbDelay = int64(hbdelay)
