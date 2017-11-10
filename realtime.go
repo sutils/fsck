@@ -2,6 +2,7 @@ package fsck
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -77,13 +78,46 @@ func (r *RealTime) MergeLog(ns map[string]int64, keys map[string]string) (hosts,
 	alllog = util.Map{}
 	hostc := 0
 	for name, log := range r.ls {
-		timeout := ns[name]
-		if timeout > 0 && now-log.Last > timeout {
-			hosts[name] = "offline"
-			continue
+		if timeout, ok := ns["*"]; ok {
+			if timeout > 0 && now-log.Last > timeout {
+				hosts[name] = "offline"
+				continue
+			}
+		} else if len(ns) > 0 {
+			timeout, ok := ns[name]
+			if !ok {
+				continue
+			}
+			if timeout > 0 && now-log.Last > timeout {
+				hosts[name] = "offline"
+				continue
+			}
 		}
-		for key := range keys {
-			alllog.SetVal(key, alllog.FloatVal(key)+log.Log.FloatVal(key))
+		for key, val := range keys {
+			switch val {
+			case "min":
+				if alllog.Exist(key) {
+					old := alllog.FloatVal(key)
+					new := log.Log.FloatVal(key)
+					if new < old {
+						alllog.SetVal(key, new)
+					}
+				} else {
+					alllog.SetVal(key, log.Log.FloatVal(key))
+				}
+			case "max":
+				if alllog.Exist(key) {
+					old := alllog.FloatVal(key)
+					new := log.Log.FloatVal(key)
+					if new > old {
+						alllog.SetVal(key, new)
+					}
+				} else {
+					alllog.SetVal(key, log.Log.FloatVal(key))
+				}
+			default:
+				alllog.SetVal(key, alllog.FloatVal(key)+log.Log.FloatVal(key))
+			}
 		}
 		hosts[name] = "ok"
 		hostc++
@@ -91,7 +125,8 @@ func (r *RealTime) MergeLog(ns map[string]int64, keys map[string]string) (hosts,
 	r.lck.Unlock()
 	if hostc > 0 {
 		for key, val := range keys {
-			if val != "sum" {
+			if val == "avg" {
+				fmt.Println(key, alllog.FloatVal(key), float64(hostc))
 				alllog.SetVal(key, alllog.FloatVal(key)/float64(hostc))
 			}
 		}

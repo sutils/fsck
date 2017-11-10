@@ -521,6 +521,9 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		for n := range ns {
 			ns[n] = timeout * 1000
 		}
+		if len(ns) < 1 {
+			ns["*"] = timeout * 1000
+		}
 		if delay < 1 || clear > 0 {
 			delay = 0
 		}
