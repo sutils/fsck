@@ -137,7 +137,7 @@ func (r *RealTime) MergeLog(ns map[string]int64, keys map[string]string) (hosts,
 		for key, val := range keys {
 			if val == "avg" {
 				fmt.Println(key, alllog.FloatVal(key), float64(hostc))
-				alllog.SetVal(key, alllog.FloatVal(key)/float64(hostc))
+				alllog.SetVal(key, float64(int64(alllog.FloatVal(key)/float64(hostc)*100))/100)
 			}
 		}
 	}
