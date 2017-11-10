@@ -410,24 +410,24 @@ func main() {
 			}
 			sctrlLogCli(os.Args[1:]...)
 		}
-	case name == "sctrl-exec" || mode == "-run":
+	case name == "sctrl-exec" || name == "sctrl-wexec" || mode == "-run" || mode == "-wrun":
 		for _, arg := range os.Args {
 			if arg == "-h" {
-				printExecUsage(0, alias || name == "sctrl-exec")
+				printExecUsage(0, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			} else if arg == "-alias" {
 				alias = true
 			}
 		}
-		if mode == "-run" {
+		if mode == "-run" || mode == "-wrun" {
 			if len(os.Args) < 3 {
-				printExecUsage(1, alias || name == "sctrl-exec")
+				printExecUsage(1, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			}
-			sctrlExec(JoinArgs("", os.Args[2:]...))
+			sctrlExec(JoinArgs("", os.Args[2:]...), name == "sctrl-wexec" || mode == "-wrun")
 		} else {
 			if len(os.Args) < 2 {
-				printExecUsage(1, alias || name == "sctrl-exec")
+				printExecUsage(1, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			}
-			sctrlExec(JoinArgs("", os.Args[1:]...))
+			sctrlExec(JoinArgs("", os.Args[1:]...), name == "sctrl-wexec" || mode == "-wrun")
 		}
 	case name == "sctrl-wssh" || mode == "-ssh":
 		for _, arg := range os.Args {
@@ -486,7 +486,7 @@ func main() {
 				alias = true
 			}
 		}
-		sctrlExec("profile")
+		sctrlExec("profile", false)
 	case mode == "-h":
 		printAllUsage(0)
 	default:
@@ -644,8 +644,8 @@ func sctrlClient() {
 	exitf(0)
 }
 
-func sctrlExec(cmds string) {
-	code, err := execCmds(cmds, true, false, false)
+func sctrlExec(cmds string, wait bool) {
+	code, err := execCmds(cmds, true, wait, false)
 	if err != nil {
 		fmt.Printf("-error: %v\n", err)
 		code = -1
