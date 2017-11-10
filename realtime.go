@@ -34,7 +34,12 @@ func (r *RealTime) UpdateH(hs *routing.HTTPSession) routing.HResult {
 		return hs.MsgResErr2(1, "arg-err", err)
 	}
 	r.lck.Lock()
+	defer r.lck.Unlock()
 	for name, log := range data {
+		if len(strings.TrimSpace(name)) < 1 {
+			err = fmt.Errorf("the top name is empty")
+			return hs.MsgResErr2(2, "arg-err", err)
+		}
 		rl := r.ls[name]
 		if rl == nil {
 			rl = &RealLog{}
@@ -43,7 +48,6 @@ func (r *RealTime) UpdateH(hs *routing.HTTPSession) routing.HResult {
 		rl.Last = util.Now()
 		rl.Log = log
 	}
-	r.lck.Unlock()
 	return hs.MsgRes("ok")
 }
 
