@@ -47,6 +47,12 @@ func (r *RealTime) UpdateH(hs *routing.HTTPSession) routing.HResult {
 	return hs.MsgRes("ok")
 }
 
+func (r *RealTime) ListH(hs *routing.HTTPSession) routing.HResult {
+	r.lck.RLock()
+	defer r.lck.RUnlock()
+	return hs.JRes(r.ls)
+}
+
 func (r *RealTime) ShowH(hs *routing.HTTPSession) routing.HResult {
 	hs.R.ParseForm()
 	keys := map[string]string{}

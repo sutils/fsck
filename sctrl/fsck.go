@@ -527,6 +527,7 @@ func sctrlSlaver() {
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
 	routing.Shared.HFunc("/real/update", slaver.Real.UpdateH)
 	routing.Shared.HFunc("/real/show", slaver.Real.ShowH)
+	routing.Shared.HFunc("/real/list", slaver.Real.ListH)
 	wait := make(chan int)
 	<-wait
 	exitf(0)
