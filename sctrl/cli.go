@@ -68,6 +68,7 @@ type Task struct {
 	errc     int
 	Selected []string
 	Fields   map[string]string
+	Lck      sync.RWMutex
 }
 
 func NewTask(id string) *Task {
@@ -78,6 +79,7 @@ func NewTask(id string) *Task {
 		reader: r,
 		writer: w,
 		Fields: map[string]string{},
+		Lck:    sync.RWMutex{},
 	}
 	task.Fields["tid"] = task.ID
 	return task
@@ -663,7 +665,13 @@ func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, ke
 					max = len(key)
 				}
 			}
-			fmt.Fprintf(task, "->Slaver %v %v hosts -> %v\n", name, len(hosts), res.Val("status"))
+			online := 0
+			for n := range hosts {
+				if hosts.StrVal(n) == "ok" {
+					online++
+				}
+			}
+			fmt.Fprintf(task, "->Slaver %v %v/%v hosts -> %v\n", name, online, len(hosts), res.Val("status"))
 			if len(logs) > 0 {
 				vals := []string{}
 				for key, val := range logs {
@@ -797,17 +805,13 @@ func (t *Terminal) remoteTerm(task *Task, tid string) {
 func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ...interface{}) {
 	cmds := fmt.Sprintf(format, args...)
 	log.Printf("remote execute->%v", cmds)
-	t.taskLck.Lock()
-	t.slck.RLock()
-	defer func() {
-		t.slck.RUnlock()
-		t.taskLck.Unlock()
-	}()
 	if t.ss.Len() < 1 {
 		fmt.Fprintf(task, "no session to exec cmds\n")
 		task.Close()
 		return
 	}
+	t.taskLck.Lock()
+	defer t.taskLck.Unlock()
 	wg := &sync.WaitGroup{}
 	var execSession = func(session *SshSession, sid string) {
 		defer wg.Done()
@@ -843,6 +847,7 @@ func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ..
 			fmt.Fprintf(task, "%v->exec %v\n", name, cmds)
 		}
 		_, err = tcmds.WriteTo(session)
+		task.Lck.Lock()
 		if err == nil {
 			task.Subs[sid] = name
 			fmt.Fprintf(task, "%v->start success\n", name)
@@ -850,6 +855,7 @@ func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ..
 			fmt.Fprintf(task, "%v->start fail with %v\n", name, err)
 			task.errc++
 		}
+		task.Lck.Unlock()
 	}
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
