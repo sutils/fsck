@@ -238,10 +238,10 @@ func (s *SshSession) StartSession(con net.Conn) (err error) {
 	fmt.Printf("%v handshake success\n", s.Name)
 	s.MultiWriter.Disable = true
 	for _, env := range s.PreEnv {
-		fmt.Fprintf(s.stdin, "%v\n", env)
+		fmt.Fprintf(s.stdin, "export %v\n", env)
 	}
 	for _, env := range s.SshHost.Env {
-		fmt.Fprintf(s.stdin, "%v\n", env)
+		fmt.Fprintf(s.stdin, "export %v\n", env)
 	}
 	if s.Prefix != nil {
 		_, err = io.Copy(s.stdin, s.Prefix)
