@@ -61,25 +61,27 @@ type Shell interface {
 }
 
 type Task struct {
-	ID       string
-	Subs     map[string]string
-	reader   io.ReadCloser
-	writer   io.WriteCloser
-	errc     int
-	Selected []string
-	Fields   map[string]string
-	Lck      sync.RWMutex
+	ID        string
+	Subs      map[string]string
+	reader    io.ReadCloser
+	writer    io.WriteCloser
+	errc      int
+	Selected  []string
+	Fields    map[string]string
+	Lck       sync.RWMutex
+	CmdPrefix string
 }
 
 func NewTask(id string) *Task {
 	r, w := io.Pipe()
 	task := &Task{
-		ID:     id,
-		Subs:   map[string]string{},
-		reader: r,
-		writer: w,
-		Fields: map[string]string{},
-		Lck:    sync.RWMutex{},
+		ID:        id,
+		Subs:      map[string]string{},
+		reader:    r,
+		writer:    w,
+		Fields:    map[string]string{},
+		Lck:       sync.RWMutex{},
+		CmdPrefix: WebCmdPrefix,
 	}
 	task.Fields["tid"] = task.ID
 	return task
@@ -94,10 +96,12 @@ func (t *Task) Write(p []byte) (n int, err error) {
 }
 
 func (t *Task) Close() error {
-	if t.errc > 0 {
-		fmt.Fprintf(t, "%vhaving %v fair\n", WebCmdPrefix, t.errc)
-	} else {
-		fmt.Fprintf(t, "%vok\n", WebCmdPrefix)
+	if len(t.CmdPrefix) > 0 {
+		if t.errc > 0 {
+			fmt.Fprintf(t, "%vhaving %v fair\n", t.CmdPrefix, t.errc)
+		} else {
+			fmt.Fprintf(t, "%vok\n", t.CmdPrefix)
+		}
 	}
 	t.reader.Close()
 	t.writer.Close()
@@ -533,6 +537,9 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		task := NewTask("")
 		task.Selected = t.selected
 		data = task
+		if clear > 0 {
+			task.CmdPrefix = ""
+		}
 		go t.execRealTask(task, name, ns, keys, clear, time.Duration(delay)*time.Second)
 	case "sping":
 		if len(cmds) < 2 {
@@ -671,7 +678,11 @@ func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, ke
 					online++
 				}
 			}
-			fmt.Fprintf(task, "->Slaver %v %v/%v hosts -> %v\n", name, online, len(hosts), res.Val("status"))
+			if clear > 0 {
+				fmt.Fprintf(task, "->Slaver %v is clearup\n", name)
+			} else {
+				fmt.Fprintf(task, "->Slaver %v %v/%v hosts -> %v\n", name, online, len(hosts), res.Val("status"))
+			}
 			if len(logs) > 0 {
 				vals := []string{}
 				for key, val := range logs {
@@ -685,7 +696,7 @@ func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, ke
 		} else {
 			_, err = fmt.Fprintf(task, "->Slaver %v -> %v\n", name, err)
 		}
-		if err != nil || delay < 1 {
+		if err != nil || delay < 1 || clear > 0 {
 			break
 		}
 		time.Sleep(delay)

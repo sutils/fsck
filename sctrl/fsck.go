@@ -295,6 +295,40 @@ func printExecUsage(code int, alias bool) {
 	exitf(code)
 }
 
+func printSrealUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	if alias {
+		name = "sctrl-sreal"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl sreal version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [options] <field1=avg> <field2=sum> ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -timeout=5 field1=avg field2=sum\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -sreal [options] <field1=avg> <field2=sum> ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -sreal -timeout=5 field1=avg field2=sum\n", name)
+	}
+	fmt.Fprintf(os.Stderr, "Sreal options:\n")
+	fmt.Fprintf(os.Stderr, "        -timeout\n")
+	fmt.Fprintf(os.Stderr, "             the timeout of host sreal data\n")
+	fmt.Fprintf(os.Stderr, "        -clear\n")
+	fmt.Fprintf(os.Stderr, "             the operator to clear all host data\n")
+	fmt.Fprintf(os.Stderr, "        -host\n")
+	fmt.Fprintf(os.Stderr, "             pick multi host by split comma\n")
+	fmt.Fprintf(os.Stderr, "        -delay\n")
+	fmt.Fprintf(os.Stderr, "             the delay time of show data\n")
+	fmt.Fprintf(os.Stderr, "Sreal field operator:\n")
+	fmt.Fprintf(os.Stderr, "        -<field>=avg\n")
+	fmt.Fprintf(os.Stderr, "             get avg value from host by field name\n")
+	fmt.Fprintf(os.Stderr, "        -<field>=sum\n")
+	fmt.Fprintf(os.Stderr, "             get sum value from host by field name\n")
+	fmt.Fprintf(os.Stderr, "        -<field>=min\n")
+	fmt.Fprintf(os.Stderr, "             get min value from host by field name\n")
+	fmt.Fprintf(os.Stderr, "        -<field>=max\n")
+	fmt.Fprintf(os.Stderr, "             get max value from host by field name\n")
+	exitf(code)
+}
+
 func printSshUsage(code int, alias bool) {
 	_, name := filepath.Split(os.Args[0])
 	if alias {
@@ -422,12 +456,37 @@ func main() {
 			if len(os.Args) < 3 {
 				printExecUsage(1, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			}
-			sctrlExec(JoinArgs("", os.Args[2:]...), name == "sctrl-wexec" || mode == "-wrun")
+			sctrlExec(JoinArgs("", os.Args[2:]...), nil, name == "sctrl-wexec" || mode == "-wrun")
 		} else {
 			if len(os.Args) < 2 {
 				printExecUsage(1, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			}
-			sctrlExec(JoinArgs("", os.Args[1:]...), name == "sctrl-wexec" || mode == "-wrun")
+			sctrlExec(JoinArgs("", os.Args[1:]...), nil, name == "sctrl-wexec" || mode == "-wrun")
+		}
+	case name == "sctrl-sreal" || mode == "-sreal":
+		for _, arg := range os.Args {
+			if arg == "-h" {
+				printSrealUsage(0, alias || name == "sctrl-sreal")
+			} else if arg == "-alias" {
+				alias = true
+			}
+		}
+		if mode == "-sreal" {
+			if len(os.Args) < 3 {
+				printSrealUsage(1, alias || name == "sctrl-sreal")
+			}
+			cmds := JoinArgs("sreal", os.Args[2:]...)
+			sctrlExec(cmds, map[string]string{
+				"r": cmds + " -clear",
+			}, name == "sctrl-sreal")
+		} else {
+			if len(os.Args) < 2 {
+				printSrealUsage(1, alias || name == "sctrl-sreal")
+			}
+			cmds := JoinArgs("sreal", os.Args[1:]...)
+			sctrlExec(cmds, map[string]string{
+				"r": cmds + " -clear",
+			}, name == "sctrl-sreal")
 		}
 	case name == "sctrl-wssh" || mode == "-ssh":
 		for _, arg := range os.Args {
@@ -447,7 +506,7 @@ func main() {
 			}
 			cmds = JoinArgs("wssh", os.Args[1])
 		}
-		code, err := execCmds(cmds, false, true, true)
+		code, err := execCmds(cmds, nil, false, true, true)
 		if err != nil {
 			code = -1
 			fmt.Fprintf(os.Stdout, "echo %v && exit %v\n", err, code)
@@ -472,7 +531,7 @@ func main() {
 			fmt.Println(os.Args)
 			cmds = JoinArgs("wscp", os.Args[1:]...)
 		}
-		code, err := execCmds(cmds, false, false, true)
+		code, err := execCmds(cmds, nil, false, false, true)
 		if err != nil {
 			code = -1
 			fmt.Fprintf(os.Stdout, "echo %v && exit %v\n", err, code)
@@ -486,7 +545,7 @@ func main() {
 				alias = true
 			}
 		}
-		sctrlExec("profile", false)
+		sctrlExec("profile", nil, false)
 	case mode == "-h":
 		printAllUsage(0)
 	default:
@@ -649,8 +708,8 @@ func sctrlClient() {
 	exitf(0)
 }
 
-func sctrlExec(cmds string, wait bool) {
-	code, err := execCmds(cmds, true, wait, false)
+func sctrlExec(cmds string, keys map[string]string, wait bool) {
+	code, err := execCmds(cmds, keys, true, wait, false)
 	if err != nil {
 		fmt.Printf("-error: %v\n", err)
 		code = -1
@@ -661,10 +720,10 @@ func sctrlExec(cmds string, wait bool) {
 	exitf(code)
 }
 
-func execCmds(cmds string, log, wait, single bool) (code int, err error) {
+func execCmds(cmds string, keys map[string]string, log, wait, single bool) (code int, err error) {
 	url, _, err := findWebURL("", log, wait, single, 5*time.Second)
 	if err == nil {
-		code, err = ExecWebCmd(url+"/exec", cmds, os.Stdout)
+		code, err = ExecWebCmd(url+"/exec", cmds, keys, os.Stdout)
 	}
 	return
 }
