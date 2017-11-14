@@ -7,9 +7,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
-
-	"github.com/Centny/gwf/util"
 )
 
 type WebHeader interface {
@@ -114,31 +113,6 @@ func ExecWebCmd(url string, cmds string, keys map[string]string, out io.Writer) 
 			return
 		}
 	}
-	var onkey = func(key []byte, tid string) {
-		var keyCmds string
-		for k := range keys {
-			if bytes.Equal(key, []byte(k)) {
-				keyCmds = keys[k]
-				break
-			}
-		}
-		if len(keyCmds) < 1 {
-			return
-		}
-		env := util.NewFcfg3()
-		env.SetVal("tid", tid)
-		keyCmds = env.EnvReplace(keyCmds)
-		resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds="+keyCmds))
-		if err != nil {
-			fmt.Fprintf(out, "-send(%v) to task(%v) fail with %v", keyCmds, tid, err)
-			return
-		}
-		_, err = io.Copy(out, resp.Body)
-		if err != nil && err != io.EOF {
-			fmt.Fprintf(out, "-send(%v) to task(%v) reply error %v", keyCmds, tid, err)
-			return
-		}
-	}
 	resp, err := http.Post(url, "text/plain", bytes.NewBufferString("cmds="+cmds))
 	if err != nil {
 		return
@@ -151,25 +125,18 @@ func ExecWebCmd(url string, cmds string, keys map[string]string, out io.Writer) 
 	tid := resp.Header.Get("tid")
 	//
 	var running = true
-	defer readkeyClose("cmd")
-	go func() {
-		readkeyOpen("cmd")
-		for running {
-			key, err := readkeyRead("cmd")
-			if err != nil {
-				break
+	if len(tid) > 0 {
+		ctrlcSig = make(chan os.Signal)
+		signal.Notify(ctrlcSig, os.Interrupt)
+		defer signal.Stop(ctrlcSig)
+		go func() {
+			for running {
+				<-ctrlcSig
+				fmt.Println()
+				sterm(tid)
 			}
-			if bytes.Equal(key, CharTerm) {
-				if len(tid) < 1 {
-					resp.Body.Close()
-				} else {
-					sterm(tid)
-				}
-			} else {
-				onkey(key, tid)
-			}
-		}
-	}()
+		}()
+	}
 	//
 	_, err = io.Copy(outw, resp.Body)
 	if err == io.EOF {
