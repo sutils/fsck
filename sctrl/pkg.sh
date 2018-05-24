@@ -12,27 +12,19 @@ mkdir -p $output
 
 #### Package ####
 srv_name=sctrl
-srv_ver=1.0.0
-##
-srv_deamon="$srv_name"d
+srv_ver=1.1.0
 srv_out=$output/$srv_name
-mkdir $srv_out
+mkdir -p $srv_out
 ##build normal
 echo "Build $srv_name normal executor..."
 go build -o $srv_out/$srv_name github.com/sutils/fsck/sctrl
 cp -f .sctrl.json $srv_out
+cp -f sctrl-srv-installer.sh $srv_out
+cp -f sctrl-srv.service $srv_out
+cp -rf example $srv_out
 
 ###
-if [ "$1" != "" ];then
-	curl -o $srv_out/srvd $1/srvd
-	curl -o $srv_out/srvd_i $1/srvd_i
-	chmod +x $srv_out/srvd
-	chmod +x $srv_out/srvd_i
-	echo "./srvd_i \$1 $srv_name \$2 \$3" >$srv_out/install.sh
-	chmod +x $srv_out/install.sh
-fi
-###
 cd $output
-zip -r $srv_name.zip $srv_name
+zip -r $srv_name-$srv_ver-`uname`.zip $srv_name
 cd ../
 echo "Package $srv_name done..."

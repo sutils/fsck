@@ -1,0 +1,12 @@
+windows:
+  - name: test
+    layout: layout-3-2
+    root: .
+    panes:
+      - export SCTRL_INSTANCE=test && sctrl-ssh db1
+      - export SCTRL_INSTANCE=test && sctrl-ssh dms1
+      - export SCTRL_INSTANCE=test && sctrl-ssh dms1
+      - export SCTRL_INSTANCE=test && sctrl-log jenkins
+      - commands:
+          - sctrl-cli 2> sctrl.log
+        focus: true

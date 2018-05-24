@@ -772,10 +772,10 @@ func TestMain(t *testing.T) {
 		// return
 	}
 	{ //test by web command
-		sctrlExec("shelp")
+		sctrlExec("shelp", nil, true)
 		wait := make(chan int)
 		go func() {
-			sctrlExec("sexec sleep 10")
+			sctrlExec("sexec sleep 10", nil, true)
 			wait <- 0
 		}()
 		for ctrlcSig == nil {
@@ -788,7 +788,7 @@ func TestMain(t *testing.T) {
 	}
 	{ //test error
 		exitf = notexit
-		sctrlExec("sadd")
+		sctrlExec("sadd", nil, true)
 	}
 	//
 	// fmt.Fprintf(terminal, "shelp\necho %v$?\n", terminal.CmdPrefix)

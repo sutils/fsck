@@ -1,0 +1,26 @@
+{
+    "name": "test",
+    "server": "xxxx:xxx",
+    "login": "",
+    "bash": "/bin/bash",
+    "hosts": [
+        {
+            "name": "loc",
+            "uri": "master://root:xxx@localhost?pty=xterm",
+            "startup": 0,
+            "env": {
+                "ws": "/tmp"
+            }
+        }
+    ],
+    "forward": [
+        {
+            "name": "rsync",
+            "local": "",
+            "remote": "master://localhost:873"
+        }
+    ],
+    "env": {
+        "pub_url": "http://pb.srv.m:7623"
+    }
+}

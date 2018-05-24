@@ -423,7 +423,7 @@ func (m *Master) Send(sid uint16, ctype, cid string, c netw.Cmd, data []byte) in
 	var reply []byte
 	var err error
 	if pings {
-		log.D("Master receive ping session(%v) command from %v", sid, c.RemoteAddr())
+		log_d("Master receive ping session(%v) command from %v", sid, c.RemoteAddr())
 		beg := util.Now()
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, uint64(beg))

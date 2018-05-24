@@ -14,6 +14,12 @@ import (
 
 var ShowLog int
 
+func log_d(format string, args ...interface{}) {
+	if ShowLog > 1 {
+		log.D_(1, format, args...)
+	}
+}
+
 const (
 	SS_NEW    = 20
 	SS_NORMAL = 0
