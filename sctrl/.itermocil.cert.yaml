@@ -1,0 +1,13 @@
+windows:
+  - name: sctrl
+    layout: layout-4-2
+    root: $GOPATH/src/github.com/sutils/fsck/sctrl
+    panes:
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -s -token abc=1 -webaddr :9090 -cert build/sctrl/certs/server.pem -key build/sctrl/certs/server.key
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -sc -master localhost:9234 -auth abc -name test -realaddr :9235 -cert build/sctrl/certs/slaver.pem -key build/sctrl/certs/slaver.key
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl-ssh.sh loc
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -lc debug
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -lc allhost
+      - commands:
+          - go build && ./sctrl -c -webaddr :9091 -cert build/sctrl/certs/client.pem -key build/sctrl/certs/client.key
+        focus: true

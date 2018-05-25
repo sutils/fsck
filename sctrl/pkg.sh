@@ -19,9 +19,19 @@ mkdir -p $srv_out
 echo "Build $srv_name normal executor..."
 go build -o $srv_out/$srv_name github.com/sutils/fsck/sctrl
 cp -f .sctrl.json $srv_out
-cp -f sctrl-srv-installer.sh $srv_out
+cp -f sctrl-installer.sh $srv_out
 cp -f sctrl-srv.service $srv_out
+cp -f sctrl-sc.service $srv_out
 cp -rf example $srv_out
+
+##
+mkdir $srv_out/certs/
+echo "make server cert"
+openssl req -new -nodes -x509 -out $srv_out/certs/server.pem -keyout $srv_out/certs/server.key -days 3650 -subj "/C=CN/ST=NRW/L=Earth/O=Random Company/OU=IT/CN=rsck.dyang.org/emailAddress=cert@dyang.org"
+echo "make slaver cert"
+openssl req -new -nodes -x509 -out $srv_out/certs/slaver.pem -keyout $srv_out/certs/slaver.key -days 3650 -subj "/C=CN/ST=NRW/L=Earth/O=Random Company/OU=IT/CN=rsck.dyang.org/emailAddress=cert@dyang.org"
+echo "make client cert"
+openssl req -new -nodes -x509 -out $srv_out/certs/client.pem -keyout $srv_out/certs/client.key -days 3650 -subj "/C=CN/ST=NRW/L=Earth/O=Random Company/OU=IT/CN=rsck.dyang.org/emailAddress=cert@dyang.org"
 
 ###
 cd $output

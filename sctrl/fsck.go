@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -77,6 +80,8 @@ var webAddr string
 var webSuffix string
 var webAuth string
 var workspace string
+var cert string
+var key string
 
 //not alias argument
 var runClient bool
@@ -101,6 +106,9 @@ func regCommonFlags() {
 	flag.StringVar(&webAddr, "webaddr", "", "the web server listen address")
 	flag.StringVar(&webAuth, "webauth", "", "the web server basi auth")
 	flag.StringVar(&webSuffix, "websuffix", "", "the web server suffix")
+
+	flag.StringVar(&cert, "cert", "", "the cert file")
+	flag.StringVar(&key, "key", "", "the cert key")
 }
 
 //sctrl-server argument flags
@@ -628,6 +636,25 @@ func sctrlServer() {
 		gwflog.D("Listen web server on %v", webAddr)
 		go routing.ListenAndServe(webAddr)
 	}
+	if len(cert) > 0 {
+		gwflog.D("server load x509 cert:%v,key:%v", cert, key)
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			gwflog.E("server load cert fail with %v", err)
+			os.Exit(1)
+			return
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
+		config.Rand = rand.Reader
+		server.NewListenerF = func(l *netw.Listener) (raw net.Listener, err error) {
+			raw, err = tls.Listen("tcp", l.Port, config)
+			return
+		}
+		server.Local.DailAddr = func(addr string) (raw net.Conn, err error) {
+			raw, err = tls.Dial("tcp", addr, config)
+			return
+		}
+	}
 	err := server.Run(listen, tokens)
 	if err != nil {
 		fmt.Println(err)
@@ -644,6 +671,21 @@ func sctrlSlaver() {
 	slaver := fsck.NewSlaver("slaver")
 	slaver.HbDelay = int64(hbdelay)
 	slaver.SP.RegisterDefaulDialer()
+	if len(cert) > 0 {
+		gwflog.D("slaver load x509 cert:%v,key:%v", cert, key)
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			gwflog.E("slaver load cert fail with %v", err)
+			os.Exit(1)
+			return
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
+		config.Rand = rand.Reader
+		slaver.DailAddr = func(addr string) (raw net.Conn, err error) {
+			raw, err = tls.Dial("tcp", addr, config)
+			return
+		}
+	}
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
 	routing.Shared.HFunc("/real/update", slaver.Real.UpdateH)
 	routing.Shared.HFunc("/real/show", slaver.Real.ShowH)
@@ -737,6 +779,21 @@ func sctrlClient() {
 		exepath, _ := os.Executable()
 		exepath, _ = filepath.Abs(exepath)
 		webcmd, _ = filepath.Split(exepath)
+	}
+	if len(cert) > 0 {
+		gwflog.D("client load x509 cert:%v,key:%v", cert, key)
+		cert, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			gwflog.E("client load cert fail with %v", err)
+			os.Exit(1)
+			return
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
+		config.Rand = rand.Reader
+		client.DailAddr = func(addr string) (raw net.Conn, err error) {
+			raw, err = tls.Dial("tcp", addr, config)
+			return
+		}
 	}
 	terminal = NewTerminal(client, name, ps1, bash, webcmd, buffered)
 	terminal.InstancePath = instancePath

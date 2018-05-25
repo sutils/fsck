@@ -6,7 +6,7 @@ After=network.target
 User=rs-server
 Restart=always
 WorkingDirectory=/srv/rsck/
-ExecStart=/srv/rsck/rsck -s -cert=certs/server.pem -key=certs/server.key -auth <auth> -acl <acl> -showlog=1
+ExecStart=/srv/sctrl/sctrl -s -listen -token abc=1 -webaddr :9090 -cert build/sctrl/certs/server.pem -key build/sctrl/certs/server.key
 
 [Install]
 WantedBy=multi-user.target

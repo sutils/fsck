@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -80,6 +81,8 @@ type Master struct {
 	sidc    uint16
 	//
 	pings map[uint16]int64
+	//
+	NewListenerF func(l *netw.Listener) (raw net.Listener, err error)
 }
 
 func NewMaster() *Master {
@@ -91,6 +94,10 @@ func NewMaster() *Master {
 		ni2s:    map[string]string{},
 		si2n:    map[string]string{},
 		pings:   map[uint16]int64{},
+		NewListenerF: func(l *netw.Listener) (raw net.Listener, err error) {
+			raw, err = net.Listen("tcp", l.Port)
+			return
+		},
 	}
 	srv.Forward = NewForward(srv.DialSession)
 	return srv
@@ -112,6 +119,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddHFunc("/usr/status", m.StatusH)
 	m.L.AddHFunc("/usr/real_log", m.RealLogH)
 	m.L.AddHFunc("ping", m.PingH)
+	m.L.NewListenerF = m.NewListenerF
 	err = m.L.Run()
 	return
 }
@@ -602,6 +610,8 @@ type Slaver struct {
 	OnLogin func(a *rc.AutoLoginH, err error)
 	Real    *RealTime
 	Forward *Forward
+	//
+	DailAddr func(addr string) (raw net.Conn, err error)
 }
 
 func NewSlaver(alias string) *Slaver {
@@ -609,6 +619,10 @@ func NewSlaver(alias string) *Slaver {
 		Alias: alias,
 		SP:    NewSessionPool(),
 		Real:  NewRealTime(),
+		DailAddr: func(addr string) (raw net.Conn, err error) {
+			raw, err = net.Dial("tcp", addr)
+			return
+		},
 	}
 	slaver.Forward = NewForward(slaver.DialSession)
 	return slaver
@@ -676,12 +690,12 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	s.Channel = NewChannel(s.R.RCBH, s.R.RCM_Con.RC_Con, s.R.RCM_Con, s.R.RCM_S, s.SP)
 	s.Channel.Real = s.Real
 	s.Channel.Name = ctype
+	s.R.L.DailAddr = s.DailAddr
 	s.R.Start()
 	if s.HbDelay > 0 {
 		s.R.HbDelay = s.HbDelay
 		s.R.StartHbTimer()
 	}
-
 	return s.R.Valid()
 }
 

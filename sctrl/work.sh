@@ -1,2 +1,2 @@
 #!/bin/bash
-itermocil --layout .itermocil.yaml
+itermocil --layout .itermocil$1.yaml
