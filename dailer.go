@@ -40,31 +40,31 @@ func (c *CombinedReadWriterCloser) Close() (err error) {
 	return
 }
 
-type Dailer interface {
+type Dialer interface {
 	Bootstrap() error
 	Matched(uri string) bool
-	Dail(cid uint16, uri string) (r io.ReadWriteCloser, err error)
+	Dial(cid uint16, uri string) (r io.ReadWriteCloser, err error)
 }
 
-type TCPDailer struct {
+type TCPDialer struct {
 	portMatcher *regexp.Regexp
 }
 
-func NewTCPDailer() *TCPDailer {
-	return &TCPDailer{
+func NewTCPDialer() *TCPDialer {
+	return &TCPDialer{
 		portMatcher: regexp.MustCompile("^.*:[0-9]+$"),
 	}
 }
 
-func (t *TCPDailer) Bootstrap() error {
+func (t *TCPDialer) Bootstrap() error {
 	return nil
 }
 
-func (t *TCPDailer) Matched(uri string) bool {
+func (t *TCPDialer) Matched(uri string) bool {
 	return true
 }
 
-func (t *TCPDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err error) {
+func (t *TCPDialer) Dial(cid uint16, uri string) (raw io.ReadWriteCloser, err error) {
 	remote, err := url.Parse(uri)
 	if err == nil {
 		network := remote.Scheme
@@ -86,8 +86,8 @@ func (t *TCPDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err er
 	return
 }
 
-func (t *TCPDailer) String() string {
-	return "TCPDailer"
+func (t *TCPDialer) String() string {
+	return "TCPDialer"
 }
 
 var CMD_CTRL_C = []byte{255, 244, 255, 253, 6}
@@ -113,33 +113,33 @@ func (c *CmdStdinWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
-type CmdDailer struct {
+type CmdDialer struct {
 	Replace  []byte
 	CloseTag []byte
 }
 
-func NewCmdDailer() *CmdDailer {
-	return &CmdDailer{
+func NewCmdDialer() *CmdDialer {
+	return &CmdDialer{
 		Replace:  []byte("\r"),
 		CloseTag: CMD_CTRL_C,
 	}
 }
 
-func (c *CmdDailer) Bootstrap() error {
+func (c *CmdDialer) Bootstrap() error {
 	return nil
 }
 
-func (c *CmdDailer) Matched(uri string) bool {
+func (c *CmdDialer) Matched(uri string) bool {
 	return strings.HasPrefix(uri, "tcp://cmd")
 }
 
-func (c *CmdDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err error) {
+func (c *CmdDialer) Dial(cid uint16, uri string) (raw io.ReadWriteCloser, err error) {
 	remote, err := url.Parse(uri)
 	if err != nil {
 		return
 	}
 	runnable := remote.Query().Get("exec")
-	log.D("CmdDailer dail to cmd:%v", runnable)
+	log.D("CmdDialer dial to cmd:%v", runnable)
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -163,7 +163,7 @@ func (c *CmdDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err er
 		Writer: cmdWriter,
 		Reader: retReader,
 		Closer: func() error {
-			log.D("CmdDailer will kill the cmd(%v)", cid)
+			log.D("CmdDialer will kill the cmd(%v)", cid)
 			stdWriter.Close()
 			stdin.Close()
 			cmd.Process.Kill()
@@ -191,30 +191,30 @@ func (c *CmdDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err er
 	return
 }
 
-func (t *CmdDailer) String() string {
-	return "CmdDailer"
+func (t *CmdDialer) String() string {
+	return "CmdDialer"
 }
 
-type WebDailer struct {
+type WebDialer struct {
 	accept  chan net.Conn
 	consLck sync.RWMutex
-	cons    map[string]*WebDailerConn
+	cons    map[string]*WebDialerConn
 	davsLck sync.RWMutex
 	davs    map[string]*WebdavHandler
 }
 
-func NewWebDailer() (dailer *WebDailer) {
-	dailer = &WebDailer{
+func NewWebDialer() (dialer *WebDialer) {
+	dialer = &WebDialer{
 		accept:  make(chan net.Conn, 10),
 		consLck: sync.RWMutex{},
-		cons:    map[string]*WebDailerConn{},
+		cons:    map[string]*WebDialerConn{},
 		davsLck: sync.RWMutex{},
 		davs:    map[string]*WebdavHandler{},
 	}
 	return
 }
 
-func (web *WebDailer) Bootstrap() error {
+func (web *WebDialer) Bootstrap() error {
 	go func() {
 		http.Serve(web, web)
 		close(web.accept)
@@ -222,17 +222,17 @@ func (web *WebDailer) Bootstrap() error {
 	return nil
 }
 
-func (web *WebDailer) Shutdown() error {
+func (web *WebDialer) Shutdown() error {
 	web.accept <- nil
 	return nil
 }
 
-func (web *WebDailer) Matched(uri string) bool {
+func (web *WebDialer) Matched(uri string) bool {
 	return strings.HasPrefix(uri, "http://web")
 }
 
-func (web *WebDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err error) {
-	conn, raw, err := PipeWebDailerConn(cid, uri)
+func (web *WebDialer) Dial(cid uint16, uri string) (raw io.ReadWriteCloser, err error) {
+	conn, raw, err := PipeWebDialerConn(cid, uri)
 	if err != nil {
 		return
 	}
@@ -244,38 +244,38 @@ func (web *WebDailer) Dail(cid uint16, uri string) (raw io.ReadWriteCloser, err 
 }
 
 //for net.Listener
-func (web *WebDailer) Accept() (conn net.Conn, err error) {
+func (web *WebDialer) Accept() (conn net.Conn, err error) {
 	conn = <-web.accept
 	if conn == nil {
-		err = fmt.Errorf("WebDail is closed")
+		err = fmt.Errorf("WebDial is closed")
 	}
 	return
 }
 
-func (web *WebDailer) Close() error {
+func (web *WebDialer) Close() error {
 	return nil
 }
-func (web *WebDailer) Addr() net.Addr {
+func (web *WebDialer) Addr() net.Addr {
 	return web
 }
 
-func (web *WebDailer) Network() string {
+func (web *WebDialer) Network() string {
 	return "tcp"
 }
 
-func (web *WebDailer) String() string {
-	return "WebDailer(0:0)"
+func (web *WebDialer) String() string {
+	return "WebDialer(0:0)"
 }
 
 //for http.Handler
-func (web *WebDailer) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
+func (web *WebDialer) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	cid := req.RemoteAddr
 	web.consLck.Lock()
 	conn := web.cons[cid]
 	web.consLck.Unlock()
 	if conn == nil {
 		resp.WriteHeader(404)
-		fmt.Fprintf(resp, "WebDailConn is not exist by cid(%v)", cid)
+		fmt.Fprintf(resp, "WebDialConn is not exist by cid(%v)", cid)
 		return
 	}
 	web.davsLck.Lock()
@@ -288,14 +288,14 @@ func (web *WebDailer) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	dav.ServeHTTP(resp, req)
 }
 
-type WebDailerConn struct {
+type WebDialerConn struct {
 	*PipedConn
 	CID uint16
 	URI string
 	DIR string
 }
 
-func PipeWebDailerConn(cid uint16, uri string) (conn *WebDailerConn, raw io.ReadWriteCloser, err error) {
+func PipeWebDialerConn(cid uint16, uri string) (conn *WebDialerConn, raw io.ReadWriteCloser, err error) {
 	args, err := url.Parse(uri)
 	if err != nil {
 		return
@@ -305,7 +305,7 @@ func PipeWebDailerConn(cid uint16, uri string) (conn *WebDailerConn, raw io.Read
 		err = fmt.Errorf("the dir arguemnt is required")
 		return
 	}
-	conn = &WebDailerConn{
+	conn = &WebDialerConn{
 		CID: cid,
 		URI: uri,
 		DIR: dir,
@@ -314,16 +314,16 @@ func PipeWebDailerConn(cid uint16, uri string) (conn *WebDailerConn, raw io.Read
 	return
 }
 
-func (w *WebDailerConn) LocalAddr() net.Addr {
+func (w *WebDialerConn) LocalAddr() net.Addr {
 	return w
 }
-func (w *WebDailerConn) RemoteAddr() net.Addr {
+func (w *WebDialerConn) RemoteAddr() net.Addr {
 	return w
 }
-func (w *WebDailerConn) Network() string {
-	return "WebDailer"
+func (w *WebDialerConn) Network() string {
+	return "WebDialer"
 }
-func (w *WebDailerConn) String() string {
+func (w *WebDialerConn) String() string {
 	return fmt.Sprintf("%v", w.CID)
 }
 
@@ -351,21 +351,21 @@ func (w *WebdavHandler) ServeHTTP(resp http.ResponseWriter, req *http.Request) {
 	}
 }
 
-type EchoDailer struct {
+type EchoDialer struct {
 }
 
-func NewEchoDailer() (dailer *EchoDailer) {
-	dailer = &EchoDailer{}
+func NewEchoDialer() (dialer *EchoDialer) {
+	dialer = &EchoDialer{}
 	return
 }
 
-func (e *EchoDailer) Bootstrap() error {
+func (e *EchoDialer) Bootstrap() error {
 	return nil
 }
-func (e *EchoDailer) Matched(uri string) bool {
+func (e *EchoDialer) Matched(uri string) bool {
 	return uri == "echo"
 }
-func (e *EchoDailer) Dail(cid uint16, uri string) (r io.ReadWriteCloser, err error) {
+func (e *EchoDialer) Dial(cid uint16, uri string) (r io.ReadWriteCloser, err error) {
 	r = NewEchoReadWriteCloser()
 	return
 }

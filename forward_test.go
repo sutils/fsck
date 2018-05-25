@@ -13,11 +13,11 @@ import (
 
 func TestForwad(t *testing.T) {
 	master := NewMaster()
-	master.SP.RegisterDefaulDailer()
+	master.SP.RegisterDefaulDialer()
 	go master.Run(":9372", map[string]int{"abc": 1})
 	time.Sleep(time.Second)
 	slaver := NewSlaver("abc1")
-	slaver.SP.RegisterDefaulDailer()
+	slaver.SP.RegisterDefaulDialer()
 	err := slaver.StartSlaver("localhost:9372", "master", "abc")
 	if err != nil {
 		t.Error("error")
@@ -57,7 +57,7 @@ func TestForwad(t *testing.T) {
 		return nil
 	}
 	{ //test server forward
-		forward2 := NewForward(master.DailSession)
+		forward2 := NewForward(master.DialSession)
 		_, err = forward2.AddUriForward("xz-0", "tcp://:23211<master>tcp://localhost:9392")
 		if err != nil {
 			t.Error(err)

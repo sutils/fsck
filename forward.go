@@ -52,7 +52,7 @@ func (m *Mapping) String() string {
 	return fmt.Sprintf("%v<%v>%v", m.Local, m.Name, m.Remote)
 }
 
-type ForwardDailerF func(channel, uri string, raw io.WriteCloser) (session Session, err error)
+type ForwardDialerF func(channel, uri string, raw io.WriteCloser) (session Session, err error)
 
 type Forward struct {
 	ls        map[string]*ForwardListener
@@ -63,10 +63,10 @@ type Forward struct {
 	lck       sync.RWMutex
 	WebSuffix string
 	WebAuth   string
-	Dailer    ForwardDailerF
+	Dialer    ForwardDialerF
 }
 
-func NewForward(dailer ForwardDailerF) *Forward {
+func NewForward(dialer ForwardDialerF) *Forward {
 	return &Forward{
 		ls:     map[string]*ForwardListener{},
 		ms:     map[string]*Mapping{},
@@ -74,7 +74,7 @@ func NewForward(dailer ForwardDailerF) *Forward {
 		stop:   map[string]chan int{},
 		ws:     map[string]*Mapping{},
 		lck:    sync.RWMutex{},
-		Dailer: dailer,
+		Dialer: dialer,
 	}
 }
 
@@ -173,9 +173,9 @@ func (f *Forward) accept(m *Mapping, listen net.Listener, channel, uri string) {
 			log.D("Forwad(%v) accept fail with %v", m.Name, err)
 			break
 		}
-		session, err := f.Dailer(channel, uri, conn)
+		session, err := f.Dialer(channel, uri, conn)
 		if err != nil {
-			log.E("Forward(%v) dail new session by channel(%v),uri(%v) fail with %v", m.Name, channel, uri, err)
+			log.E("Forward(%v) dial new session by channel(%v),uri(%v) fail with %v", m.Name, channel, uri, err)
 			conn.Close()
 			continue
 		}
@@ -287,10 +287,10 @@ func (f *Forward) ProcWebForward(hs *routing.HTTPSession) routing.HResult {
 		},
 		Transport: &http.Transport{
 			Dial: func(network, addr string) (raw net.Conn, err error) {
-				return f.procDail(network, addr, mapping)
+				return f.procDial(network, addr, mapping)
 			},
 			DialTLS: func(network, addr string) (raw net.Conn, err error) {
-				return f.procDailTLS(network, addr, mapping)
+				return f.procDialTLS(network, addr, mapping)
 			},
 		},
 	}
@@ -298,13 +298,13 @@ func (f *Forward) ProcWebForward(hs *routing.HTTPSession) routing.HResult {
 	return routing.HRES_RETURN
 }
 
-func (f *Forward) procDail(network, addr string, mapping *Mapping) (raw net.Conn, err error) {
-	raw, err = f.Dailer(mapping.Channel, mapping.Remote.String(), nil)
+func (f *Forward) procDial(network, addr string, mapping *Mapping) (raw net.Conn, err error) {
+	raw, err = f.Dialer(mapping.Channel, mapping.Remote.String(), nil)
 	return
 }
 
-func (f *Forward) procDailTLS(network, addr string, mapping *Mapping) (raw net.Conn, err error) {
-	rawCon, err := f.Dailer(mapping.Channel, mapping.Remote.String(), nil)
+func (f *Forward) procDialTLS(network, addr string, mapping *Mapping) (raw net.Conn, err error) {
+	rawCon, err := f.Dialer(mapping.Channel, mapping.Remote.String(), nil)
 	if err != nil {
 		return
 	}

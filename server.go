@@ -38,7 +38,7 @@ func NewServer() *Server {
 		Master: NewMaster(),
 		Local:  NewSlaver("local"),
 	}
-	srv.Forward = NewForward(srv.Master.DailSession)
+	srv.Forward = NewForward(srv.Master.DialSession)
 	return srv
 }
 
@@ -105,7 +105,7 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddToken(ts)
 	m.L.RCBH.AddF(ChannelCmdS, m.OnChannelCmd)
 	m.L.AddFFunc("^/usr/.*$", m.AccessH)
-	m.L.AddHFunc("/usr/dial", m.DailH)
+	m.L.AddHFunc("/usr/dial", m.DialH)
 	m.L.AddHFunc("/usr/close", m.CloseH)
 	m.L.AddHFunc("/usr/list", m.ListH)
 	m.L.AddHFunc("/usr/status", m.StatusH)
@@ -246,7 +246,7 @@ func (m *Master) RealLogH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	return
 }
 
-func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
+func (m *Master) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	var name, uri string
 	err = rc.ValidF(`
 		uri,R|S,L:0;
@@ -260,12 +260,12 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		err = fmt.Errorf("the session is empty, not login?")
 		return
 	}
-	_, val, err = m.Dail(session, name, uri)
+	_, val, err = m.Dial(session, name, uri)
 	return
 }
 
-func (m *Master) DailSession(name, uri string, raw io.WriteCloser) (session Session, err error) {
-	sid, _, err := m.Dail("master", name, uri)
+func (m *Master) DialSession(name, uri string, raw io.WriteCloser) (session Session, err error) {
+	sid, _, err := m.Dial("master", name, uri)
 	if err == nil {
 		session = m.SP.Bind(sid, WriterF(func(p []byte) (n int, err error) {
 			_, err = m.WriteToSlaver(name, p)
@@ -276,7 +276,7 @@ func (m *Master) DailSession(name, uri string, raw io.WriteCloser) (session Sess
 	return
 }
 
-func (m *Master) Dail(session, name, uri string) (sid uint16, res util.Map, err error) {
+func (m *Master) Dial(session, name, uri string) (sid uint16, res util.Map, err error) {
 	m.slck.Lock()
 	cid := m.slavers[name]
 	m.sidc++
@@ -715,8 +715,8 @@ func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	if err != nil {
 		return
 	}
-	defer c.M.Done(c.M.Start("dail"))
-	session, err := c.SP.Dail(sid, uri, c)
+	defer c.M.Done(c.M.Start("dial"))
+	session, err := c.SP.Dial(sid, uri, c)
 	if err != nil {
 		return
 	}

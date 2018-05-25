@@ -14,14 +14,14 @@ import (
 	"github.com/Centny/gwf/util"
 )
 
-func TestCmdDailer(t *testing.T) {
-	cmd := NewCmdDailer()
+func TestCmdDialer(t *testing.T) {
+	cmd := NewCmdDialer()
 	cmd.Bootstrap()
 	if !cmd.Matched("tcp://cmd?exec=bash") {
 		t.Error("error")
 		return
 	}
-	raw, err := cmd.Dail(10, "tcp://cmd?exec=bash")
+	raw, err := cmd.Dial(10, "tcp://cmd?exec=bash")
 	if err != nil {
 		t.Error(err)
 		return
@@ -39,7 +39,7 @@ func TestCmdDailer(t *testing.T) {
 	fmt.Printf("%v\n", cmd)
 	//
 	//test encoding
-	raw, err = cmd.Dail(10, "tcp://cmd?exec=bash&LC=zh_CN.GBK")
+	raw, err = cmd.Dial(10, "tcp://cmd?exec=bash&LC=zh_CN.GBK")
 	if err != nil {
 		t.Error(err)
 		return
@@ -49,7 +49,7 @@ func TestCmdDailer(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	raw.Close()
 	//
-	raw, err = cmd.Dail(10, "tcp://cmd?exec=bash&LC=zh_CN.GB18030")
+	raw, err = cmd.Dial(10, "tcp://cmd?exec=bash&LC=zh_CN.GB18030")
 	if err != nil {
 		t.Error(err)
 		return
@@ -60,22 +60,22 @@ func TestCmdDailer(t *testing.T) {
 	raw.Close()
 	//
 	//test error
-	_, err = cmd.Dail(100, "://cmd")
+	_, err = cmd.Dial(100, "://cmd")
 	if err == nil {
 		t.Error("error")
 		return
 	}
 }
 
-func TestWebDailer(t *testing.T) {
-	//test web dailer
+func TestWebDialer(t *testing.T) {
+	//test web dialer
 	l, err := net.Listen("tcp", ":2422")
 	if err != nil {
 		t.Error(err)
 		return
 	}
-	dailer := NewWebDailer()
-	dailer.Bootstrap()
+	dialer := NewWebDialer()
+	dialer.Bootstrap()
 	go func() {
 		var cid uint16
 		for {
@@ -83,7 +83,7 @@ func TestWebDailer(t *testing.T) {
 			if err != nil {
 				break
 			}
-			raw, err := dailer.Dail(cid, "tcp://web?dir=/tmp")
+			raw, err := dialer.Dial(cid, "tcp://web?dir=/tmp")
 			if err != nil {
 				panic(err)
 			}
@@ -103,12 +103,12 @@ func TestWebDailer(t *testing.T) {
 	}()
 	fmt.Println(util.HGet("http://localhost:2422/"))
 	fmt.Println(util.HPost("http://localhost:2422/", nil))
-	dailer.Shutdown()
+	dialer.Shutdown()
 	time.Sleep(100 * time.Millisecond)
 	//for cover
-	fmt.Printf("%v,%v\n", dailer.Addr(), dailer.Network())
+	fmt.Printf("%v,%v\n", dialer.Addr(), dialer.Network())
 	//test web conn
-	conn, _, err := PipeWebDailerConn(100, "tcp://web?dir=/tmp")
+	conn, _, err := PipeWebDialerConn(100, "tcp://web?dir=/tmp")
 	if err != nil {
 		t.Error(err)
 		return
@@ -118,19 +118,19 @@ func TestWebDailer(t *testing.T) {
 	conn.SetWriteDeadline(time.Now())
 	fmt.Printf("%v,%v,%v\n", conn.LocalAddr(), conn.RemoteAddr(), conn.Network())
 	//test error
-	_, _, err = PipeWebDailerConn(100, "://")
+	_, _, err = PipeWebDialerConn(100, "://")
 	if err == nil {
 		t.Error(err)
 		return
 	}
-	_, _, err = PipeWebDailerConn(100, "tcp://web")
+	_, _, err = PipeWebDialerConn(100, "tcp://web")
 	if err == nil {
 		t.Error(err)
 		return
 	}
 	//
 	ts := httptest.NewServer(func(hs *routing.HTTPSession) routing.HResult {
-		dailer.ServeHTTP(hs.W, hs.R)
+		dialer.ServeHTTP(hs.W, hs.R)
 		return routing.HRES_RETURN
 	})
 	data, err := ts.G("/")
@@ -139,7 +139,7 @@ func TestWebDailer(t *testing.T) {
 		return
 	}
 	//
-	_, err = dailer.Dail(100, "://")
+	_, err = dialer.Dial(100, "://")
 	if err == nil {
 		t.Error(err)
 		return

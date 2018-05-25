@@ -51,8 +51,8 @@ type Session interface {
 	RawWrite(p []byte) (n int, err error)
 }
 
-type SessionDailer interface {
-	Dail(sid uint16, uri string, out io.Writer) (session Session, err error)
+type SessionDialer interface {
+	Dial(sid uint16, uri string, out io.Writer) (session Session, err error)
 	Bind(sid uint16, out io.Writer) (session Session, err error)
 }
 
@@ -180,7 +180,7 @@ type SessionPool struct {
 	ss      map[uint16]Session
 	lck     sync.RWMutex
 	wg      sync.WaitGroup
-	Dailers []Dailer
+	Dialers []Dialer
 }
 
 func NewSessionPool() *SessionPool {
@@ -191,9 +191,9 @@ func NewSessionPool() *SessionPool {
 	}
 }
 
-func (s *SessionPool) RegisterDefaulDailer() (err error) {
-	for _, dailer := range []Dailer{NewCmdDailer(), NewEchoDailer(), NewWebDailer(), NewTCPDailer()} {
-		err = s.AddDailer(dailer)
+func (s *SessionPool) RegisterDefaulDialer() (err error) {
+	for _, dialer := range []Dialer{NewCmdDialer(), NewEchoDialer(), NewWebDialer(), NewTCPDialer()} {
+		err = s.AddDialer(dialer)
 		if err != nil {
 			return
 		}
@@ -201,23 +201,23 @@ func (s *SessionPool) RegisterDefaulDailer() (err error) {
 	return
 }
 
-func (s *SessionPool) AddDailer(dailer Dailer) error {
-	err := dailer.Bootstrap()
+func (s *SessionPool) AddDialer(dialer Dialer) error {
+	err := dialer.Bootstrap()
 	if err != nil {
-		log.E("SessionPool bootstrap dailer fail with %v", err)
+		log.E("SessionPool bootstrap dialer fail with %v", err)
 		return err
 	}
-	s.Dailers = append(s.Dailers, dailer)
+	s.Dialers = append(s.Dialers, dialer)
 	return nil
 }
 
-func (s *SessionPool) Dail(sid uint16, uri string, out io.Writer) (session Session, err error) {
+func (s *SessionPool) Dial(sid uint16, uri string, out io.Writer) (session Session, err error) {
 	var raw io.ReadWriteCloser
-	err = fmt.Errorf("not matched dailer for %v", uri)
-	for _, dailer := range s.Dailers {
-		if dailer.Matched(uri) {
-			log.D("SessionPool will use %v to dail by %v", dailer, uri)
-			raw, err = dailer.Dail(sid, uri)
+	err = fmt.Errorf("not matched dialer for %v", uri)
+	for _, dialer := range s.Dialers {
+		if dialer.Matched(uri) {
+			log.D("SessionPool will use %v to dial by %v", dialer, uri)
+			raw, err = dialer.Dial(sid, uri)
 			break
 		}
 	}

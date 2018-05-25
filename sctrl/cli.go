@@ -564,7 +564,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			buf := bytes.NewBuffer(nil)
 			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: $args\"", session.Name, session.URI, suri)
 			fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v $sargs\n", session.Password, suri)
-			//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+			//fmt.Fprintf(buf, "echo dial to %v,%v by %v\n", session.Name, session.URI, suri)
 			data = buf.Bytes()
 		}
 	case "wscp":
@@ -618,7 +618,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 				fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
 					session.Password, strings.SplitN(mapping.Local.Host, ":", 2)[1], suri, dst)
 			}
-			//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
+			//fmt.Fprintf(buf, "echo dial to %v,%v by %v\n", session.Name, session.URI, suri)
 			data = buf.Bytes()
 		}
 	case "profile":

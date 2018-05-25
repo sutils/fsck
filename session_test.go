@@ -13,12 +13,12 @@ import (
 
 func TestEchoSession(t *testing.T) {
 	sp1 := NewSessionPool()
-	sp1.AddDailer(NewEchoDailer())
+	sp1.AddDialer(NewEchoDialer())
 	sp2 := NewSessionPool()
 	ew1 := &echowriter{W: sp1}
 	ew2 := &echowriter{W: sp2}
 	//
-	sp1.Dail(100, "echo", ew2)
+	sp1.Dial(100, "echo", ew2)
 	ss2 := sp2.Start(100, ew1).(*SidSession)
 	ss2.MaxDelay = 100 * time.Millisecond
 	ss2.Timeout = 500 * time.Millisecond

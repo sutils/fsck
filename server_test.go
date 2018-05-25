@@ -50,15 +50,15 @@ func TestRc(t *testing.T) {
 	// impl.ShowLog = true
 	server := NewServer()
 	server.HbDelay = 3000
-	server.Local.SP.RegisterDefaulDailer()
-	server.SP.RegisterDefaulDailer()
+	server.Local.SP.RegisterDefaulDialer()
+	server.SP.RegisterDefaulDialer()
 	go server.Run(":9372", nil)
 	time.Sleep(time.Second)
 	server.L.AddToken(map[string]int{"abc": 2})
 	//
 	client := NewSlaver("abc2")
 	client.HbDelay = 3000
-	client.SP.RegisterDefaulDailer()
+	client.SP.RegisterDefaulDialer()
 	err := client.StartClient("localhost:9372", "xxxx", "abc")
 	if err != nil {
 		t.Error("error")
@@ -208,7 +208,7 @@ func TestRc(t *testing.T) {
 			return
 		}
 		//mock remote session not found
-		session, err := client.SP.Dail(100, "tcp://localhost:9392", ioutil.Discard)
+		session, err := client.SP.Dial(100, "tcp://localhost:9392", ioutil.Discard)
 		if err != nil {
 			t.Error(err)
 			return
@@ -220,7 +220,7 @@ func TestRc(t *testing.T) {
 			return
 		}
 		//mock remote clinet not found
-		session, err = client.SP.Dail(101, "tcp://localhost:9392", ioutil.Discard)
+		session, err = client.SP.Dial(101, "tcp://localhost:9392", ioutil.Discard)
 		if err != nil {
 			t.Error(err)
 			return
@@ -390,7 +390,7 @@ func TestRc(t *testing.T) {
 		}
 		_, err = client.DialSession("master", "tcp://localhost:10", nil)
 		if err == nil {
-			t.Error("not dail error")
+			t.Error("not dial error")
 			return
 		}
 		_, err = client.R.Exec_m("/usr/close", util.Map{
