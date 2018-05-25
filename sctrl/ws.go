@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
-
-	"github.com/sutils/fsck"
 )
 
 type Host struct {
@@ -22,7 +20,7 @@ type WorkConf struct {
 	PS1      string                 `json:"ps1"`
 	Instance string                 `json:"instance"`
 	Hosts    []*Host                `json:"hosts"`
-	Forward  []*fsck.Mapping        `json:"forward"`
+	Forward  map[string]string      `json:"forward"`
 	Env      map[string]interface{} `json:"env"`
 }
 

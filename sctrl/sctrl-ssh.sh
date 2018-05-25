@@ -9,4 +9,12 @@ cargs=($*)
 sargs_=("${cargs[@]:1}")
 sargs="${sargs_[@]}"
 path=`dirname ${0}`/sctrl
-eval `$path -ssh $1`
+cmds=`$path -ssh $1`
+ecode=$?
+if [ "$ecode" == "200" ];then
+    eval $cmds
+else
+    echo $cmds
+    echo "exit code:$ecode"
+    exit $ecode
+fi

@@ -192,7 +192,7 @@ func printAllUsage(code int) {
 	_, name := filepath.Split(os.Args[0])
 	fmt.Fprintf(os.Stderr, "Sctrl version %v\n", Version)
 	fmt.Fprintf(os.Stderr, "Usage:  %v <-s|-c|-sc|-lc|-run] [option]\n", name)
-	fmt.Fprintf(os.Stderr, "        %v -s -listen :9423 -token abc\n", name)
+	fmt.Fprintf(os.Stderr, "        %v -s -listen :9234 -token abc\n", name)
 	fmt.Fprintf(os.Stderr, "        %v -c -server sctrl.srv:9423 -login abc\n", name)
 	fmt.Fprintf(os.Stderr, "        %v -sc -master sctrl.srv:9423 -auth abc -name x1\n", name)
 	fmt.Fprintf(os.Stderr, "        %v -lc debug\n", name)

@@ -29,7 +29,8 @@ const (
 
 type Server struct {
 	*Master
-	Local *Slaver
+	Local   *Slaver
+	Forward *Forward
 }
 
 func NewServer() *Server {
@@ -37,6 +38,7 @@ func NewServer() *Server {
 		Master: NewMaster(),
 		Local:  NewSlaver("local"),
 	}
+	srv.Forward = NewForward(srv.Master.DailSession)
 	return srv
 }
 
@@ -69,6 +71,7 @@ func (s *Server) Close() error {
 type Master struct {
 	L       *rc.RC_Listener_m
 	HbDelay int64
+	SP      *SessionPool
 	slck    sync.RWMutex
 	slavers map[string]string //slaver name map to connect id
 	clients map[string]string //client session map to connect id
@@ -81,6 +84,7 @@ type Master struct {
 
 func NewMaster() *Master {
 	srv := &Master{
+		SP:      NewSessionPool(),
 		slck:    sync.RWMutex{},
 		slavers: map[string]string{},
 		clients: map[string]string{},
@@ -256,10 +260,27 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		err = fmt.Errorf("the session is empty, not login?")
 		return
 	}
+	_, val, err = m.Dail(session, name, uri)
+	return
+}
+
+func (m *Master) DailSession(name, uri string, raw io.WriteCloser) (session Session, err error) {
+	sid, _, err := m.Dail("master", name, uri)
+	if err == nil {
+		session = m.SP.Bind(sid, WriterF(func(p []byte) (n int, err error) {
+			_, err = m.WriteToSlaver(name, p)
+			n = len(p)
+			return
+		}), raw)
+	}
+	return
+}
+
+func (m *Master) Dail(session, name, uri string) (sid uint16, res util.Map, err error) {
 	m.slck.Lock()
 	cid := m.slavers[name]
 	m.sidc++
-	sid := m.sidc
+	sid = m.sidc
 	m.slck.Unlock()
 	if len(cid) < 1 {
 		err = fmt.Errorf("the channel is not found by name(%v)", name)
@@ -271,7 +292,7 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		return
 	}
 	log.D("Master try dial to %v on channel(%v),session(%v)", uri, name, session)
-	res, err := cmdc.Exec_m("dial", util.Map{
+	res, err = cmdc.Exec_m("dial", util.Map{
 		"uri":  uri,
 		"name": name,
 		"sid":  sid,
@@ -280,7 +301,6 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		return
 	}
 	// sid := uint16(res.IntVal("sid"))
-
 	m.slck.Lock()
 	m.ni2s[fmt.Sprintf("%v-%v", name, sid)] = session
 	m.si2n[fmt.Sprintf("%v-%v", session, sid)] = name
@@ -288,7 +308,6 @@ func (m *Master) DailH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 		m.pings[sid] = 0
 	}
 	m.slck.Unlock()
-	val = res
 	log.D("Master dial to %v on channel(%v),session(%v) success with sid(%v)", uri, name, session, sid)
 	return
 }
@@ -409,21 +428,18 @@ func (m *Master) OnChannelCmd(c netw.Cmd) int {
 	return m.OnClientCmd(c)
 }
 
-func (m *Master) Send(sid uint16, ctype, cid string, c netw.Cmd, data []byte) int {
+func (m *Master) Send(sid uint16, cid string, data []byte) (reply []byte, err error) {
 	cmdc := m.L.CmdC(cid)
 	if cmdc == nil {
-		log.D("Master transfer data to %v by cid(%v) fail with connect not found", ctype, cid)
-		c.Writeb([]byte(fmt.Sprintf("%v not found by id(%v)", ctype, cid)))
-		return -1
+		log.D("Master transfer data to cid(%v) fail with connect not found", cid)
+		err = fmt.Errorf("connection not found by id(%v)", cid)
+		return
 	}
 	m.slck.RLock()
 	_, pings := m.pings[sid]
 	m.slck.RUnlock()
 	//
-	var reply []byte
-	var err error
 	if pings {
-		log_d("Master receive ping session(%v) command from %v", sid, c.RemoteAddr())
 		beg := util.Now()
 		buf := make([]byte, 8)
 		binary.BigEndian.PutUint64(buf, uint64(beg))
@@ -434,34 +450,33 @@ func (m *Master) Send(sid uint16, ctype, cid string, c netw.Cmd, data []byte) in
 	} else {
 		reply, err = cmdc.ExecV(ChannelCmdC, true, data)
 	}
-	if err != nil {
-		c.Writeb([]byte(err.Error()))
-		log.D("Master %v repy error %v", ctype, err)
-	} else {
-		c.Writeb(reply)
-	}
-	return 0
+	return
 }
 
-func (m *Master) OnSlaverCmd(c netw.Cmd) int {
-	name := c.Kvs().StrVal("name")
-	data := c.Data()
+func (m *Master) WriteToClient(name string, data []byte) (reply []byte, err error) {
 	sid := binary.BigEndian.Uint16(data[1:])
 	m.slck.RLock()
 	session := m.ni2s[fmt.Sprintf("%v-%v", name, sid)]
 	cid := m.clients[session]
 	m.slck.RUnlock()
-	if len(session) < 1 {
+	switch session {
+	case "":
 		log.D("Master transfer data to client by name(%v),sid(%v) fail with session not found", name, sid)
-		c.Writeb([]byte(ErrSessionNotFound.Error()))
-		return 0
+		err = ErrSessionNotFound
+	case "master":
+		_, err = m.SP.Write(data)
+		if err == nil {
+			reply = []byte(OK)
+		} else {
+			reply = []byte(err.Error())
+		}
+	default:
+		reply, err = m.Send(sid, cid, data)
 	}
-	return m.Send(sid, TypeClient, cid, c, data)
+	return
 }
 
-func (m *Master) OnClientCmd(c netw.Cmd) int {
-	session := c.Kvs().StrVal("session")
-	data := c.Data()
+func (m *Master) WriteToSlaver(session string, data []byte) (reply []byte, err error) {
 	sid := binary.BigEndian.Uint16(data[1:])
 	m.slck.RLock()
 	name := m.si2n[fmt.Sprintf("%v-%v", session, sid)]
@@ -469,10 +484,37 @@ func (m *Master) OnClientCmd(c netw.Cmd) int {
 	m.slck.RUnlock()
 	if len(name) < 1 {
 		log.D("Master transfer data to slaver by session(%v),sid(%v) fail with name not found", session, sid)
-		c.Writeb([]byte(ErrSessionNotFound.Error()))
-		return 0
+		err = ErrSessionNotFound
+	} else {
+		reply, err = m.Send(sid, cid, data)
 	}
-	return m.Send(sid, TypeSlaver, cid, c, data)
+	return
+}
+
+func (m *Master) OnSlaverCmd(c netw.Cmd) int {
+	name := c.Kvs().StrVal("name")
+	data := c.Data()
+	reply, err := m.WriteToClient(name, data)
+	if err != nil {
+		c.Writeb([]byte(err.Error()))
+		log.D("Master slaver repy error %v", err)
+	} else {
+		c.Writeb(reply)
+	}
+	return 0
+}
+
+func (m *Master) OnClientCmd(c netw.Cmd) int {
+	session := c.Kvs().StrVal("session")
+	data := c.Data()
+	reply, err := m.WriteToSlaver(session, data)
+	if err != nil {
+		c.Writeb([]byte(err.Error()))
+		log.D("Master slaver repy error %v", err)
+	} else {
+		c.Writeb(reply)
+	}
+	return 0
 }
 
 //OnConn see ConHandler for detail
@@ -525,11 +567,12 @@ type Slaver struct {
 }
 
 func NewSlaver(alias string) *Slaver {
-	return &Slaver{
+	slaver := &Slaver{
 		Alias: alias,
 		SP:    NewSessionPool(),
 		Real:  NewRealTime(),
 	}
+	return slaver
 }
 
 func (s *Slaver) StartSlaver(rcaddr, name, token string) (err error) {
@@ -566,8 +609,8 @@ func (s *Slaver) Start(rcaddr, name, session, token, ctype string) (err error) {
 	return s.R.Valid()
 }
 
-func (s *Slaver) DialSession(name, uri string) (session *Session, err error) {
-	return s.Channel.DialSession(name, uri)
+func (s *Slaver) DialSession(name, uri string, raw io.WriteCloser) (session Session, err error) {
+	return s.Channel.DialSession(name, uri, raw)
 }
 
 func (s *Slaver) CloseSession(sid uint16) (err error) {
@@ -679,9 +722,9 @@ func (c *Channel) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	}
 	val = util.Map{
 		"uri": uri,
-		"sid": session.SID,
+		"sid": session.ID(),
 	}
-	log.D("Channel(%v) create session by uri(%v) is success with sid(%v)", c.Name, uri, session.SID)
+	log.D("Channel(%v) create session by uri(%v) is success with sid(%v)", c.Name, uri, session.ID())
 	return
 }
 
@@ -701,9 +744,9 @@ func (c *Channel) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	}
 	val = util.Map{
 		"code": 0,
-		"sid":  session.SID,
+		"sid":  session.ID(),
 	}
-	log.D("Channel(%v) remove session(%v) success", c.Name, session.SID)
+	log.D("Channel(%v) remove session(%v) success", c.Name, session.ID())
 	return
 }
 
@@ -798,10 +841,10 @@ func (c *Channel) OnMasterCmd(cmd netw.Cmd) int {
 	return 0
 }
 
-func (c *Channel) DialSession(name, uri string) (session *Session, err error) {
+func (c *Channel) DialSession(name, uri string, raw io.WriteCloser) (session Session, err error) {
 	sid, err := c.Dial(name, uri)
 	if err == nil {
-		session = c.SP.Start(sid, c)
+		session = c.SP.Bind(sid, c, raw)
 		log.D("Channel(%v) dial to %v on channel(%v) success with %v", c.Name, uri, name, sid)
 	}
 	return
@@ -813,8 +856,8 @@ func (c *Channel) PingSession(name, data string) (used, slaverCall, slaverBack i
 	pings := c.pings[name]
 	for i := 0; i < 3; i++ {
 		if pings == nil {
-			var ss *Session
-			ss, err = c.DialSession(name, "echo")
+			var ss Session
+			ss, err = c.DialSession(name, "echo", nil)
 			if err == nil {
 				pings = NewEchoPing(ss)
 				c.pings[name] = pings

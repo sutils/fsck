@@ -196,7 +196,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 		taskLck:      sync.RWMutex{},
 		InstancePath: "/tmp/.sctrl_instance.json",
 		Name:         name,
-		Forward:      fsck.NewForward(c),
+		Forward:      fsck.NewForward(c.DialSession),
 		stdout:       os.Stdout,
 		profile:      bytes.NewBuffer(nil),
 		//
@@ -395,25 +395,13 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			err = saddmapUsage
 			return
 		}
-		args := SpaceRegex.Split(cmds[1], 3)
+		args := SpaceRegex.Split(cmds[1], 2)
 		if len(args) < 2 {
 			err = saddmapUsage
 			return
 		}
 		var m *fsck.Mapping
-		if len(args) > 2 {
-			m = &fsck.Mapping{
-				Name:   args[0],
-				Local:  args[1],
-				Remote: args[2],
-			}
-		} else {
-			m = &fsck.Mapping{
-				Name:   args[0],
-				Remote: args[1],
-			}
-		}
-		_, err = t.Forward.Start(m)
+		m, err = t.Forward.AddUriForward(args[0], args[1])
 		if err == nil {
 			data = fmt.Sprintf("%v mapping %v to %v success\n", m.Name, m.Local, m.Remote)
 		}
@@ -434,7 +422,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 			if namemax < namelen {
 				namemax = namelen
 			}
-			locallen := len(m.Local)
+			locallen := len(m.Local.String())
 			if localmax < locallen {
 				localmax = locallen
 			}
@@ -572,7 +560,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		var mapping *fsck.Mapping
 		session, mapping, err = t.checkHostForward(cmds[1])
 		if err == nil {
-			suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.TrimPrefix(mapping.Local, ":"))
+			suri := fmt.Sprintf("%v@localhost -p %v", session.Username, strings.SplitN(mapping.Local.Host, ":", 2)[1])
 			buf := bytes.NewBuffer(nil)
 			fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: $args\"", session.Name, session.URI, suri)
 			fmt.Fprintf(buf, "&& sshpass -p \"%v\" ssh -o StrictHostKeyChecking=no %v $sargs\n", session.Password, suri)
@@ -623,12 +611,12 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 				suri = fmt.Sprintf("%v@localhost:%v", session.Username, dst)
 				fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
 				fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
-					session.Password, strings.TrimPrefix(mapping.Local, ":"), src, suri)
+					session.Password, strings.SplitN(mapping.Local.Host, ":", 2)[1], src, suri)
 			} else {
 				suri = fmt.Sprintf("%v@localhost:%v", session.Username, src)
 				fmt.Fprintf(buf, "echo -e \"Sctrl start dial to %v,%v by\\n    uri: %v\\n  cmds: scp\"", session.Name, session.URI, suri)
 				fmt.Fprintf(buf, "&& sshpass -p \"%v\" scp -o StrictHostKeyChecking=no -P %v -r %v %v\n",
-					session.Password, strings.TrimPrefix(mapping.Local, ":"), suri, dst)
+					session.Password, strings.SplitN(mapping.Local.Host, ":", 2)[1], suri, dst)
 			}
 			//fmt.Fprintf(buf, "echo dail to %v,%v by %v\n", session.Name, session.URI, suri)
 			data = buf.Bytes()
@@ -737,10 +725,10 @@ func (t *Terminal) checkHostForward(name string) (session *SshSession, mapping *
 		return
 	}
 	//check forward
-	muri := fmt.Sprintf("%v://%v", session.Channel, session.URI)
+	muri := fmt.Sprintf("tcp://<%v>%v", session.Channel, session.URI)
 	allms := t.Forward.List()
 	for _, m := range allms {
-		if m.Remote == muri {
+		if m.Remote.String() == session.URI {
 			mapping = m
 			break
 		}
@@ -767,11 +755,7 @@ func (t *Terminal) checkHostForward(name string) (session *SshSession, mapping *
 			err = fmt.Errorf("echo 'too many forward by name(%v)' && exit 1", name)
 			return
 		}
-		mapping = &fsck.Mapping{
-			Name:   name,
-			Remote: muri,
-		}
-		_, err = t.Forward.Start(mapping)
+		mapping, err = t.Forward.AddUriForward(name, muri)
 	}
 	return
 }
@@ -1084,9 +1068,14 @@ func (t *Terminal) AddSession(name, uri string, connect bool, env map[string]int
 	return
 }
 
-func (t *Terminal) AddForward(m *fsck.Mapping) (err error) {
-	fmt.Printf("add forward by name(%v),local(%v),remote(%v)\n", m.Name, m.Local, m.Remote)
-	_, err = t.Forward.Start(m)
+// func (t *Terminal) AddForward(m *fsck.Mapping) (err error) {
+// 	fmt.Printf("add forward by name(%v),local(%v),remote(%v)\n", m.Name, m.Local, m.Remote)
+// 	err = t.Forward.AddForward(m)
+// 	return
+// }
+
+func (t *Terminal) AddUriForward(name, uri string) (m *fsck.Mapping, err error) {
+	m, err = t.Forward.AddUriForward(name, uri)
 	return
 }
 
@@ -1175,12 +1164,13 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 			fmt.Printf("add session fail with %v\n", err)
 		}
 	}
-	for _, forward := range conf.Forward {
-		if len(forward.Name) < 1 || len(forward.Remote) < 1 {
-			fmt.Printf("forward conf %v is not correct,name/remote must be setted\n", MarshalAll(forward))
-			continue
-		}
-		err := t.AddForward(forward)
+	for name, forward := range conf.Forward {
+		// if len(forward.Name) < 1 || len(forward.Remote.) < 1 {
+		// 	fmt.Printf("forward conf %v is not correct,name/remote must be setted\n", MarshalAll(forward))
+		// 	continue
+		// }
+		fmt.Printf("add forward by %v,%v", name, forward)
+		_, err := t.AddUriForward(name, forward)
 		if err != nil {
 			fmt.Printf("add forward fail with %v\n", err)
 		}

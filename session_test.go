@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"testing"
 	"time"
 
@@ -12,12 +13,13 @@ import (
 
 func TestEchoSession(t *testing.T) {
 	sp1 := NewSessionPool()
+	sp1.AddDailer(NewEchoDailer())
 	sp2 := NewSessionPool()
 	ew1 := &echowriter{W: sp1}
 	ew2 := &echowriter{W: sp2}
 	//
 	sp1.Dail(100, "echo", ew2)
-	ss2 := sp2.Start(100, ew1)
+	ss2 := sp2.Start(100, ew1).(*SidSession)
 	ss2.MaxDelay = 100 * time.Millisecond
 	ss2.Timeout = 500 * time.Millisecond
 	//
@@ -123,4 +125,12 @@ func (e *echowriter) Write(p []byte) (n int, err error) {
 		})}
 	}
 	return
+}
+
+func TestSidSessionCover(t *testing.T) {
+	session := NewSidSession(100, ioutil.Discard, nil)
+	session.SetDeadline(time.Now())
+	session.SetReadDeadline(time.Now())
+	session.SetWriteDeadline(time.Now())
+	fmt.Printf("-%v-%v-%v->\n", session.LocalAddr().String(), session.RemoteAddr().Network(), session.String())
 }

@@ -328,12 +328,12 @@ func TestMain(t *testing.T) {
 	}
 	{
 		fmt.Println("testing saddmap---->")
-		writekey("saddmap echo :8392 test://localhost:9392")
+		writekey("saddmap echo 'tcp://:8392<test>tcp://localhost:9392'")
 		if m := <-back; m != "0" {
 			t.Error(m)
 			return
 		}
-		writekey("saddmap echo2 test://localhost:9392")
+		writekey("saddmap echo2 'tcp://<test>tcp://localhost:9392'")
 		if m := <-back; m != "0" {
 			t.Error(m)
 			return

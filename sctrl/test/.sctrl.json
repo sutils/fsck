@@ -34,23 +34,11 @@
             }
         }
     ],
-    "forward": [
-        {
-            "name": "loc",
-            "local": ":2943",
-            "remote": "test://loc.m:80"
-        },
-        {
-            "name": "",
-            "local": ":2943",
-            "remote": "test://loc.m:80"
-        },
-        {
-            "name": "locxxx",
-            "local": "xx",
-            "remote": "test://loc.m:80"
-        }
-    ],
+    "forward": {
+        "loc": "tcp://:2943<test>tcp://loc.m:80",
+        "": "tcp://:2943<test>tcp://loc.m:80",
+        "locxxx": "tcp://xx<test>tcp://loc.m:80"
+    },
     "env": {
         "name1": "value1"
     }

@@ -50,12 +50,15 @@ func TestRc(t *testing.T) {
 	// impl.ShowLog = true
 	server := NewServer()
 	server.HbDelay = 3000
+	server.Local.SP.RegisterDefaulDailer()
+	server.SP.RegisterDefaulDailer()
 	go server.Run(":9372", nil)
 	time.Sleep(time.Second)
 	server.L.AddToken(map[string]int{"abc": 2})
 	//
 	client := NewSlaver("abc2")
 	client.HbDelay = 3000
+	client.SP.RegisterDefaulDailer()
 	err := client.StartClient("localhost:9372", "xxxx", "abc")
 	if err != nil {
 		t.Error("error")
@@ -115,7 +118,7 @@ func TestRc(t *testing.T) {
 		}, 1)
 	}
 	//
-	session, err := client.DialSession("master", "localhost:9392")
+	session, err := client.DialSession("master", "tcp://localhost:9392", nil)
 	if err != nil {
 		t.Error(err)
 		return
@@ -132,7 +135,6 @@ func TestRc(t *testing.T) {
 		return
 	}
 	//
-
 	{
 		//test slaver login not name
 		wait := make(chan error)
@@ -174,19 +176,19 @@ func TestRc(t *testing.T) {
 			return
 		}
 		//dial to unknow remote
-		_, err = client.DialSession("master", "localhost:732")
+		_, err = client.DialSession("master", "tcp://localhost:732", nil)
 		if err == nil {
 			t.Error(err)
 			return
 		}
 		//dial to unknow name
-		_, err = client.DialSession("xxxs", "localhost:732")
+		_, err = client.DialSession("xxxs", "tcp://localhost:732", nil)
 		if err == nil {
 			t.Error(err)
 			return
 		}
 		//dial url empty
-		_, err = client.DialSession("uuux", "")
+		_, err = client.DialSession("uuux", "", nil)
 		if err == nil {
 			t.Error(err)
 			return
@@ -194,7 +196,7 @@ func TestRc(t *testing.T) {
 		//cid is not found
 		server.slavers["mock_s"] = "cxx"
 		server.clients["mock_c"] = "cxx"
-		_, err = client.DialSession("mock_s", "localhost:732")
+		_, err = client.DialSession("mock_s", "tcp://localhost:732", nil)
 		if err == nil {
 			t.Error(err)
 			return
@@ -206,24 +208,24 @@ func TestRc(t *testing.T) {
 			return
 		}
 		//mock remote session not found
-		session, err := client.SP.Dail(100, "localhost:9392", ioutil.Discard)
+		session, err := client.SP.Dail(100, "tcp://localhost:9392", ioutil.Discard)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		server.si2n[fmt.Sprintf("xxxx-%v", session.SID)] = "master"
-		err = client.CloseSession(session.SID)
+		server.si2n[fmt.Sprintf("xxxx-%v", session.ID())] = "master"
+		err = client.CloseSession(session.ID())
 		if err == nil {
 			t.Error(err)
 			return
 		}
 		//mock remote clinet not found
-		session, err = client.SP.Dail(101, "localhost:9392", ioutil.Discard)
+		session, err = client.SP.Dail(101, "tcp://localhost:9392", ioutil.Discard)
 		if err != nil {
 			t.Error(err)
 			return
 		}
-		err = client.CloseSession(session.SID)
+		err = client.CloseSession(session.ID())
 		if err == nil {
 			t.Error(err)
 			return
@@ -316,8 +318,8 @@ func TestRc(t *testing.T) {
 		}
 		//remote closed by sid
 		session = server.Local.SP.Start(8, ioutil.Discard)
-		server.si2n[fmt.Sprintf("xxxx-%v", session.SID)] = "master"
-		session.Raw.Close()
+		server.si2n[fmt.Sprintf("xxxx-%v", session.ID())] = "master"
+		session.Close()
 		_, err = client.Channel.Write([]byte{0, 0, byte(8), 0, 0})
 		if err != ErrSessionClosed {
 			t.Error(err)
@@ -325,19 +327,19 @@ func TestRc(t *testing.T) {
 		}
 		//
 		//session wirte error
-		session = server.Local.SP.Start(9, &mockwriter{})
-		session.Timeout, session.MaxDelay = 1*time.Second, 200*time.Millisecond
-		_, err = session.Write([]byte("test"))
+		sidSession := server.Local.SP.Start(9, &mockwriter{}).(*SidSession)
+		sidSession.Timeout, sidSession.MaxDelay = 1*time.Second, 200*time.Millisecond
+		_, err = sidSession.Write([]byte("test"))
 		if err != io.EOF {
 			t.Error(err)
 			return
 		}
-		_, err = session.Write([]byte("test"))
+		_, err = sidSession.Write([]byte("test"))
 		if err != io.EOF {
 			t.Error(err)
 			return
 		}
-		_, err = session.Write([]byte("test"))
+		_, err = sidSession.Write([]byte("test"))
 		if err != io.EOF {
 			t.Error(err)
 			return
@@ -354,7 +356,7 @@ func TestRc(t *testing.T) {
 			defer func() {
 				recover()
 			}()
-			(&Session{}).Read(nil)
+			(&SidSession{}).Read(nil)
 		}()
 		//
 		server.Master.OnCmd(nil)
@@ -386,7 +388,7 @@ func TestRc(t *testing.T) {
 		for _, c := range server.Master.L.CmdCs() {
 			c.Kvs().SetVal("session", "")
 		}
-		_, err = client.DialSession("master", "localhost:10")
+		_, err = client.DialSession("master", "tcp://localhost:10", nil)
 		if err == nil {
 			t.Error("not dail error")
 			return
@@ -425,7 +427,7 @@ func TestRc(t *testing.T) {
 		runner.Stop()
 		cid := server.clients["xxm"]
 		// fmt.Println("---->")
-		server.Send(110, TypeSlaver, cid, &mockcmd{}, []byte("abc"))
+		server.Send(110, cid, []byte("abc"))
 		//
 	}
 	{ //test slaver handler error

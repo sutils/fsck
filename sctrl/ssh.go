@@ -35,10 +35,10 @@ func (n *NetAddr) String() string {
 
 type SshNetConn struct {
 	URI string
-	*fsck.Session
+	fsck.Session
 }
 
-func NewSshNetConn(uri string, s *fsck.Session) *SshNetConn {
+func NewSshNetConn(uri string, s fsck.Session) *SshNetConn {
 	return &SshNetConn{
 		URI:     uri,
 		Session: s,
@@ -126,7 +126,7 @@ func ParseSshHost(name, uri string, env map[string]interface{}) (host *SshHost, 
 	}
 	host = &SshHost{
 		Name:    name,
-		URI:     suri,
+		URI:     "tcp://" + suri,
 		Channel: ruri.Scheme,
 	}
 	if ruri.User != nil {
@@ -184,7 +184,7 @@ func (s *SshSession) DisableCallback() {
 }
 
 func (s *SshSession) Start() (err error) {
-	session, err := s.C.DialSession(s.Channel, s.URI)
+	session, err := s.C.DialSession(s.Channel, s.URI, nil)
 	if err == nil {
 		s.conn = NewSshNetConn(s.URI, session)
 		err = s.StartSession(s.conn)
