@@ -116,6 +116,9 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	return
 }
 
+func (m *Master) LoadForward() *Forward {
+	return m.Forward
+}
 func (m *Master) AllForwards() (ns []string, fs map[string]*ChannelInfo, err error) {
 	fs = map[string]*ChannelInfo{}
 	mapping := m.Forward.AllForwards()
@@ -609,6 +612,10 @@ func NewSlaver(alias string) *Slaver {
 	}
 	slaver.Forward = NewForward(slaver.DialSession)
 	return slaver
+}
+
+func (s *Slaver) LoadForward() *Forward {
+	return s.Forward
 }
 
 func (s *Slaver) AllForwards() (ns []string, fs map[string]*ChannelInfo, err error) {

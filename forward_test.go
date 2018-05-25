@@ -388,6 +388,7 @@ func TestForwad(t *testing.T) {
 	time.Sleep(time.Second)
 	client.Close()
 	slaver.Close()
+	slaver2.Close()
 	master.Close()
 	time.Sleep(time.Second)
 

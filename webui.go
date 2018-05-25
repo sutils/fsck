@@ -144,20 +144,21 @@ func (m RecentLess) Less(a, b interface{}, desc bool) bool {
 	}
 }
 
-type WebUI struct {
-	WS           string
-	WebSuffix    string
-	Auth         string
-	Forward      *Forward
-	TEMP         *template.Template
-	sequence     uint64
-	AllForwardsF func() (ns []string, fs map[string]*ChannelInfo, err error)
+type ForwardCtrl interface {
+	LoadForward() *Forward
+	AllForwards() (ns []string, fs map[string]*ChannelInfo, err error)
 }
 
-func NewWebUI(forward *Forward, all func() (ns []string, fs map[string]*ChannelInfo, err error)) (webui *WebUI) {
+type WebUI struct {
+	WS       string
+	TEMP     *template.Template
+	sequence uint64
+	Ctrl     ForwardCtrl
+}
+
+func NewWebUI(ctrl ForwardCtrl) (webui *WebUI) {
 	webui = &WebUI{
-		Forward:      forward,
-		AllForwardsF: all,
+		Ctrl: ctrl,
 	}
 	usr, err := user.Current()
 	if err != nil {
@@ -200,20 +201,23 @@ func (w *WebUI) Hand(mux *routing.SessionMux, pre string) {
 	mux.HFunc("^"+pre+".*$", w.AllFilterH)
 	mux.HFunc("^"+pre+"/removeForward(\\?.*)?$", w.RemoveForwardH)
 	mux.HFunc("^"+pre+"/addForward(\\?.*)?$", w.AddForwardH)
-	mux.HFunc("^"+pre+"/removeRecent(\\?.*)?$", w.AddForwardH)
+	mux.HFunc("^"+pre+"/removeRecent(\\?.*)?$", w.RemoveRecentH)
 	mux.HFunc("^"+pre+".*$", w.IndexH)
 }
 
 func (w *WebUI) AllFilterH(hs *routing.HTTPSession) routing.HResult {
 	host := hs.R.Host
-	if len(w.WebSuffix) > 0 && strings.HasSuffix(host, w.WebSuffix) {
-		name := strings.Trim(strings.TrimSuffix(host, w.WebSuffix), ". ")
+	forward := w.Ctrl.LoadForward()
+	webSuffix := forward.WebSuffix
+	if len(webSuffix) > 0 && strings.HasSuffix(host, webSuffix) {
+		name := strings.Trim(strings.TrimSuffix(host, webSuffix), ". ")
 		if len(name) > 0 {
-			return w.Forward.ProcWebForward(hs)
+			return w.Ctrl.LoadForward().ProcWebForward(hs)
 		}
 	}
+	auth := forward.WebAuth
 	username, password, ok := hs.R.BasicAuth()
-	if len(w.Auth) > 0 && !(ok && w.Auth == fmt.Sprintf("%v:%s", username, password)) {
+	if len(auth) > 0 && !(ok && auth == fmt.Sprintf("%v:%s", username, password)) {
 		hs.W.Header().Set("WWW-Authenticate", "Basic realm=Reverse Server")
 		hs.W.WriteHeader(401)
 		hs.Printf("%v", "401 Unauthorized")
@@ -230,8 +234,9 @@ func (w *WebUI) RemoveForwardH(hs *routing.HTTPSession) routing.HResult {
 	if err != nil {
 		return hs.Printf("%v", err)
 	}
-	w.Forward.RemoveForward(local)
+	w.Ctrl.LoadForward().RemoveForward(local)
 	hs.Redirect("/")
+	log.D("WebUI remove forward by %v", local)
 	return routing.HRES_RETURN
 }
 
@@ -243,11 +248,12 @@ func (w *WebUI) AddForwardH(hs *routing.HTTPSession) routing.HResult {
 		if len(f) < 1 {
 			continue
 		}
-		_, err := w.Forward.AddUriForward(name, f)
+		_, err := w.Ctrl.LoadForward().AddUriForward(name, f)
 		if err != nil {
 			return hs.Printf("%v", err)
 		}
 		oldRecent[f]++
+		log.D("WebUI add forward by %v,%v", name, f)
 	}
 	w.WriteRecent(oldRecent)
 	hs.Redirect("/")
@@ -256,14 +262,16 @@ func (w *WebUI) AddForwardH(hs *routing.HTTPSession) routing.HResult {
 
 func (w *WebUI) RemoveRecentH(hs *routing.HTTPSession) routing.HResult {
 	oldRecent := w.ReadRecent()
-	delete(oldRecent, hs.RVal("forwards"))
+	forwards := hs.RVal("forwards")
+	delete(oldRecent, forwards)
 	w.WriteRecent(oldRecent)
 	hs.Redirect("/")
+	log.D("WebUI remove recent by %v", forwards)
 	return routing.HRES_RETURN
 }
 
 func (w *WebUI) IndexH(hs *routing.HTTPSession) routing.HResult {
-	ns, forwards, err := w.AllForwardsF()
+	ns, forwards, err := w.Ctrl.AllForwards()
 	if err != nil {
 		return hs.Printf("%v", err)
 	}
@@ -275,7 +283,7 @@ func (w *WebUI) IndexH(hs *routing.HTTPSession) routing.HResult {
 			continue
 		}
 		using := false
-		if channel, ok := forwards[oldForward.Name]; ok {
+		if channel, ok := forwards[oldForward.Channel]; ok {
 			for _, runningForward := range channel.MS {
 				if oldForward.String() == runningForward.String() {
 					using = true
@@ -291,6 +299,7 @@ func (w *WebUI) IndexH(hs *routing.HTTPSession) routing.HResult {
 			"used":    c,
 		})
 	}
+	forward := w.Ctrl.LoadForward()
 	sorter := util.NewSorter(RecentLess(""), recents)
 	sorter.Desc = true
 	sort.Sort(sorter)
@@ -298,7 +307,7 @@ func (w *WebUI) IndexH(hs *routing.HTTPSession) routing.HResult {
 		"ns":        ns,
 		"forwards":  forwards,
 		"recents":   recents,
-		"webSuffix": w.WebSuffix,
+		"webSuffix": forward.WebSuffix,
 	})
 	if err != nil {
 		log.E("Parse html fail with %v", err)

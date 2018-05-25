@@ -68,12 +68,15 @@ func (a *ArrayFlags) Set(value string) error {
 var loglevel int
 var help bool
 var alias bool
-var webAddr string
 var webdavAddr string
 var webdavPath string
 var webdavUser string
 var hbdelay int
 var realAddr string
+var webAddr string
+var webSuffix string
+var webAuth string
+var workspace string
 
 //not alias argument
 var runClient bool
@@ -89,11 +92,15 @@ func regCommonFlags() {
 	flag.BoolVar(&alias, "alias", false, "alias command")
 	flag.IntVar(&loglevel, "loglevel", 0, "the log level")
 	flag.IntVar(&hbdelay, "hbdelay", 3000, "the heartbeat delay")
-	flag.StringVar(&webAddr, "webaddr", ":9090", "the web server listen address")
 	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
 	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
 	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
 	flag.StringVar(&realAddr, "realaddr", "", "the real server listen address")
+	flag.StringVar(&workspace, "workspace", "", "the workspace dir")
+
+	flag.StringVar(&webAddr, "webaddr", "", "the web server listen address")
+	flag.StringVar(&webAuth, "webauth", "", "the web server basi auth")
+	flag.StringVar(&webSuffix, "websuffix", "", "the web server suffix")
 }
 
 //sctrl-server argument flags
@@ -611,7 +618,12 @@ func sctrlServer() {
 	server.SP.RegisterDefaulDialer()
 	server.Local.SP.RegisterDefaulDialer()
 	if len(webAddr) > 0 {
-		webui := fsck.NewWebUI(server.Forward, server.AllForwards)
+		webui := fsck.NewWebUI(server)
+		server.Forward.WebAuth = webAuth
+		server.Forward.WebSuffix = webSuffix
+		if len(workspace) > 0 {
+			webui.WS = workspace
+		}
 		webui.Hand(routing.Shared, "")
 		gwflog.D("Listen web server on %v", webAddr)
 		go routing.ListenAndServe(webAddr)
@@ -747,7 +759,12 @@ func sctrlClient() {
 	}
 	fmt.Printf("%v is connected\n", serverAddr)
 	if len(webAddr) > 0 {
-		webui := fsck.NewWebUI(client.Forward, client.AllForwards)
+		webui := fsck.NewWebUI(client)
+		client.Forward.WebAuth = webAuth
+		client.Forward.WebSuffix = webSuffix
+		if len(workspace) > 0 {
+			webui.WS = workspace
+		}
 		webui.Hand(routing.Shared, "")
 		fmt.Printf("listen web server on %v\n", webAddr)
 		go routing.ListenAndServe(webAddr)
