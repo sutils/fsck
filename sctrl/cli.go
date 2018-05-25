@@ -196,7 +196,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 		taskLck:      sync.RWMutex{},
 		InstancePath: "/tmp/.sctrl_instance.json",
 		Name:         name,
-		Forward:      fsck.NewForward(c.DialSession),
+		Forward:      c.Forward,
 		stdout:       os.Stdout,
 		profile:      bytes.NewBuffer(nil),
 		//

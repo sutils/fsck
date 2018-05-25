@@ -49,7 +49,31 @@ func (m *Mapping) RemoteValidF(format string, args ...interface{}) error {
 }
 
 func (m *Mapping) String() string {
-	return fmt.Sprintf("%v<%v>%v", m.Local, m.Name, m.Remote)
+	return fmt.Sprintf("%v<%v>%v", m.Local, m.Channel, m.Remote)
+}
+
+type MappingSorter []*Mapping
+
+func (f MappingSorter) Len() int {
+	return len(f)
+}
+
+func (f MappingSorter) Less(i, j int) bool {
+	if f[i].Name == f[j].Name {
+		return f[i].Local.String() < f[j].Local.String()
+	}
+	return f[i].Name < f[j].Name
+}
+
+func (f MappingSorter) Swap(i, j int) {
+	f[i], f[j] = f[j], f[i]
+}
+
+type ChannelInfo struct {
+	Name   string
+	Online bool
+	MS     []*Mapping
+	Remote string
 }
 
 type ForwardDialerF func(channel, uri string, raw io.WriteCloser) (session Session, err error)
@@ -95,7 +119,7 @@ func (f *Forward) AddForward(m *Mapping) (err error) {
 	}
 	switch m.Local.Scheme {
 	case "tcp":
-		if _, ok := f.ls[m.Local.String()]; ok {
+		if _, ok := f.ls[m.Local.Host]; ok {
 			err = fmt.Errorf("the forward is exsits by local(%v)", m.Local)
 			return
 		}
@@ -156,6 +180,19 @@ func (f *Forward) RemoveForward(local string) (err error) {
 			err = fmt.Errorf("forward is not exitst")
 			log.D("Forward removing forward by %v fail with not exists", local)
 		}
+	}
+	return
+}
+
+func (f *Forward) AllForwards() (mapping map[string][]*Mapping) {
+	f.lck.RLock()
+	defer f.lck.RUnlock()
+	mapping = map[string][]*Mapping{}
+	for _, l := range f.ls {
+		mapping[l.Channel] = append(mapping[l.Channel], l.Mapping)
+	}
+	for _, m := range f.ws {
+		mapping[m.Channel] = append(mapping[m.Channel], m)
 	}
 	return
 }

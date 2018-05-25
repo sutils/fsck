@@ -6,10 +6,13 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/Centny/gwf/netw"
 )
 
 func init() {
 	ShowLog = 2
+	netw.MOD_MAX_SIZE = 4
 	echo, err := NewEchoServer("tcp", ":9392")
 	if err != nil {
 		panic(err)

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,8 +30,7 @@ const (
 
 type Server struct {
 	*Master
-	Local   *Slaver
-	Forward *Forward
+	Local *Slaver
 }
 
 func NewServer() *Server {
@@ -38,7 +38,6 @@ func NewServer() *Server {
 		Master: NewMaster(),
 		Local:  NewSlaver("local"),
 	}
-	srv.Forward = NewForward(srv.Master.DialSession)
 	return srv
 }
 
@@ -72,6 +71,7 @@ type Master struct {
 	L       *rc.RC_Listener_m
 	HbDelay int64
 	SP      *SessionPool
+	Forward *Forward
 	slck    sync.RWMutex
 	slavers map[string]string //slaver name map to connect id
 	clients map[string]string //client session map to connect id
@@ -92,6 +92,7 @@ func NewMaster() *Master {
 		si2n:    map[string]string{},
 		pings:   map[uint16]int64{},
 	}
+	srv.Forward = NewForward(srv.DialSession)
 	return srv
 }
 
@@ -112,6 +113,39 @@ func (m *Master) Run(rcaddr string, ts map[string]int) (err error) {
 	m.L.AddHFunc("/usr/real_log", m.RealLogH)
 	m.L.AddHFunc("ping", m.PingH)
 	err = m.L.Run()
+	return
+}
+
+func (m *Master) AllForwards() (ns []string, fs map[string]*ChannelInfo, err error) {
+	fs = map[string]*ChannelInfo{}
+	mapping := m.Forward.AllForwards()
+	for name, nfs := range mapping {
+		sort.Sort(MappingSorter(nfs))
+		fs[name] = &ChannelInfo{
+			MS:   nfs,
+			Name: name,
+		}
+		ns = append(ns, name)
+	}
+	cs := m.L.MsgCs()
+	for _, con := range cs {
+		name := con.Kvs().StrVal("name")
+		if len(name) < 1 {
+			continue
+		}
+		if _, ok := fs[name]; ok {
+			fs[name].Online = true
+			fs[name].Remote = con.RemoteAddr().String()
+			continue
+		}
+		fs[name] = &ChannelInfo{
+			Name:   name,
+			Online: true,
+			Remote: con.RemoteAddr().String(),
+		}
+		ns = append(ns, name)
+	}
+	sort.Sort(util.NewStringSorter(ns))
 	return
 }
 
@@ -268,7 +302,7 @@ func (m *Master) DialSession(name, uri string, raw io.WriteCloser) (session Sess
 	sid, _, err := m.Dial("master", name, uri)
 	if err == nil {
 		session = m.SP.Bind(sid, WriterF(func(p []byte) (n int, err error) {
-			_, err = m.WriteToSlaver(name, p)
+			_, err = m.WriteToSlaver("master", p)
 			n = len(p)
 			return
 		}), raw)
@@ -483,7 +517,7 @@ func (m *Master) WriteToSlaver(session string, data []byte) (reply []byte, err e
 	cid := m.slavers[name]
 	m.slck.RUnlock()
 	if len(name) < 1 {
-		log.D("Master transfer data to slaver by session(%v),sid(%v) fail with name not found", session, sid)
+		log.W("Master transfer data to slaver by session(%v),sid(%v) fail with name not found", session, sid)
 		err = ErrSessionNotFound
 	} else {
 		reply, err = m.Send(sid, cid, data)
@@ -564,6 +598,7 @@ type Slaver struct {
 	Auto    *rc.AutoLoginH
 	OnLogin func(a *rc.AutoLoginH, err error)
 	Real    *RealTime
+	Forward *Forward
 }
 
 func NewSlaver(alias string) *Slaver {
@@ -572,7 +607,41 @@ func NewSlaver(alias string) *Slaver {
 		SP:    NewSessionPool(),
 		Real:  NewRealTime(),
 	}
+	slaver.Forward = NewForward(slaver.DialSession)
 	return slaver
+}
+
+func (s *Slaver) AllForwards() (ns []string, fs map[string]*ChannelInfo, err error) {
+	cs, err := s.List()
+	if err == nil {
+		fs = map[string]*ChannelInfo{}
+		mapping := s.Forward.AllForwards()
+		for name, nfs := range mapping {
+			sort.Sort(MappingSorter(nfs))
+			fs[name] = &ChannelInfo{
+				MS:   nfs,
+				Name: name,
+			}
+			ns = append(ns, name)
+		}
+		slaver := cs.MapVal("slaver")
+		for name := range slaver {
+			remote := slaver.StrVal(name)
+			remote = strings.TrimPrefix(remote, "ok->")
+			if _, ok := fs[name]; !ok {
+				fs[name] = &ChannelInfo{
+					Name:   name,
+					Online: true,
+					Remote: remote,
+				}
+				ns = append(ns, name)
+			}
+			fs[name].Online = remote != "offline"
+			fs[name].Remote = remote
+		}
+		sort.Sort(util.NewStringSorter(ns))
+	}
+	return
 }
 
 func (s *Slaver) StartSlaver(rcaddr, name, token string) (err error) {

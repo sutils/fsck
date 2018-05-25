@@ -16,20 +16,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Centny/gwf/netw/impl"
-
-	"github.com/Centny/gwf/netw"
-
-	"golang.org/x/net/webdav"
-
 	gwflog "github.com/Centny/gwf/log"
-	"github.com/Centny/gwf/routing"
-
+	"github.com/Centny/gwf/netw"
+	"github.com/Centny/gwf/netw/impl"
 	"github.com/Centny/gwf/netw/rc"
-
+	"github.com/Centny/gwf/routing"
 	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
 	"github.com/sutils/readkey"
+	"github.com/sutils/rsck"
+	"golang.org/x/net/webdav"
 )
 
 const Version = "1.0.0"
@@ -72,6 +68,7 @@ func (a *ArrayFlags) Set(value string) error {
 var loglevel int
 var help bool
 var alias bool
+var webAddr string
 var webdavAddr string
 var webdavPath string
 var webdavUser string
@@ -92,6 +89,7 @@ func regCommonFlags() {
 	flag.BoolVar(&alias, "alias", false, "alias command")
 	flag.IntVar(&loglevel, "loglevel", 0, "the log level")
 	flag.IntVar(&hbdelay, "hbdelay", 3000, "the heartbeat delay")
+	flag.StringVar(&webAddr, "webaddr", ":9090", "the web server listen address")
 	flag.StringVar(&webdavAddr, "davaddr", ":9235", "the webdav server listen address")
 	flag.StringVar(&webdavPath, "davpath", "", "the webdav root path")
 	flag.StringVar(&webdavUser, "davauth", "", "the webdav auth")
@@ -201,6 +199,24 @@ func printAllUsage(code int) {
 	fmt.Fprintf(os.Stderr, "        %v -run spick host host1\n", name)
 	fmt.Fprintf(os.Stderr, "        %v -ssh host1 | bash\n", name)
 	fmt.Fprintf(os.Stderr, "All options:\n")
+	flag.PrintDefaults()
+	exitf(code)
+}
+
+func printEchoServerUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	if alias {
+		name = "sctrl-echo"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl echo server version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v [option] ...\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -listen :9423\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -echo [option]\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -echo -listen :9423\n", name)
+	}
+	fmt.Fprintf(os.Stderr, "Server options:\n")
 	flag.PrintDefaults()
 	exitf(code)
 }
@@ -388,6 +404,13 @@ func main() {
 		mode = os.Args[1]
 	}
 	switch {
+	case name == "sctrl-echo" || mode == "-echo":
+		flag.StringVar(&listen, "listen", ":9010", "the sctrl echo server listen address")
+		flag.Parse()
+		if len(listen) < 1 {
+			printEchoServerUsage(1, name == "sctrl-echo")
+		}
+		sctrlEcho()
 	case name == "sctrl-srv" || name == "sctrl-server" || mode == "-s":
 		regCommonFlags()
 		regServerFlags(name == "sctrl-server")
@@ -553,6 +576,18 @@ func main() {
 	}
 }
 
+func sctrlEcho() {
+	gwflog.D("listen echo server on %v", listen)
+	echo, err := rsck.NewEchoServer("tcp", listen)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+		return
+	}
+	echo.Start()
+	make(chan int) <- 0
+}
+
 var server *fsck.Server
 
 func sctrlServer() {
@@ -573,6 +608,14 @@ func sctrlServer() {
 	}
 	server = fsck.NewServer()
 	server.HbDelay = int64(hbdelay)
+	server.SP.RegisterDefaulDialer()
+	server.Local.SP.RegisterDefaulDialer()
+	if len(webAddr) > 0 {
+		webui := fsck.NewWebUI(server.Forward, server.AllForwards)
+		webui.Hand(routing.Shared, "")
+		gwflog.D("Listen web server on %v", webAddr)
+		go routing.ListenAndServe(webAddr)
+	}
 	err := server.Run(listen, tokens)
 	if err != nil {
 		fmt.Println(err)
@@ -588,6 +631,7 @@ func sctrlSlaver() {
 	impl.ShowLog = loglevel > 3
 	slaver := fsck.NewSlaver("slaver")
 	slaver.HbDelay = int64(hbdelay)
+	slaver.SP.RegisterDefaulDialer()
 	slaver.StartSlaver(masterAddr, slaverName, slaverToken)
 	routing.Shared.HFunc("/real/update", slaver.Real.UpdateH)
 	routing.Shared.HFunc("/real/show", slaver.Real.ShowH)
@@ -702,6 +746,12 @@ func sctrlClient() {
 		exitf(1)
 	}
 	fmt.Printf("%v is connected\n", serverAddr)
+	if len(webAddr) > 0 {
+		webui := fsck.NewWebUI(client.Forward, client.AllForwards)
+		webui.Hand(routing.Shared, "")
+		fmt.Printf("listen web server on %v\n", webAddr)
+		go routing.ListenAndServe(webAddr)
+	}
 	<-login
 	terminal.Start(conf)
 	terminal.ProcReadkey()

@@ -23,15 +23,22 @@ func TestForwad(t *testing.T) {
 		t.Error("error")
 		return
 	}
+	slaver2 := NewSlaver("abc2")
+	err = slaver2.StartSlaver("localhost:9372", "master2", "abc")
+	if err != nil {
+		t.Error("error")
+		return
+	}
 	client := NewSlaver("abc2")
 	err = client.StartClient("localhost:9372", "xxxx", "abc")
 	if err != nil {
 		t.Error("error")
 		return
 	}
+
 	time.Sleep(time.Second)
 	//
-	forward := NewForward(client.DialSession)
+	forward := client.Forward
 	forward.WebSuffix = ".loc"
 	//
 	testmap := func(name, uri string) error {
@@ -57,7 +64,7 @@ func TestForwad(t *testing.T) {
 		return nil
 	}
 	{ //test server forward
-		forward2 := NewForward(master.DialSession)
+		forward2 := master.Forward
 		_, err = forward2.AddUriForward("xz-0", "tcp://:23211<master>tcp://localhost:9392")
 		if err != nil {
 			t.Error(err)
@@ -77,6 +84,11 @@ func TestForwad(t *testing.T) {
 		}
 		if string(buf[0:readed]) != "value-1" {
 			t.Error("error")
+			return
+		}
+		ns, fs, err := master.AllForwards()
+		if err != nil || len(ns) != 2 || len(fs) != 2 {
+			t.Error(err)
 			return
 		}
 	}
@@ -108,6 +120,11 @@ func TestForwad(t *testing.T) {
 		}
 		_, err = forward.AddUriForward("wtest-5", "web://loctest3<testx>http://192.168.1.1")
 		if err != nil {
+			t.Error(err)
+			return
+		}
+		ns, fs, err := client.AllForwards()
+		if err != nil || len(ns) != 3 || len(fs) != 3 {
 			t.Error(err)
 			return
 		}
