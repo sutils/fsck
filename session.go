@@ -324,7 +324,7 @@ func (s *SessionPool) Write(p []byte) (n int, err error) {
 	}
 	n, err = session.RawWrite(p[3:])
 	if err != nil {
-		s.Remove(sid)
+		session.Close()
 		err = ErrSessionClosed
 	}
 	return
@@ -333,7 +333,7 @@ func (s *SessionPool) Write(p []byte) (n int, err error) {
 func (s *SessionPool) Close() error {
 	s.lck.Lock()
 	for _, ss := range s.ss {
-		ss.Close()
+		ss.OnlyClose()
 	}
 	s.lck.Unlock()
 	s.wg.Wait()
