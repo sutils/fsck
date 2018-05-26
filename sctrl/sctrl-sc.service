@@ -1,0 +1,12 @@
+[Unit]
+Description=Sctrl Slaver Service
+After=network.target
+
+[Service]
+User=sctrl-sc
+Restart=always
+WorkingDirectory=/srv/sctrl/
+ExecStart=/srv/sctrl/sctrl -sc -master localhost:9234 -auth abc -name test -showlog=1 -cert=certs/server.pem -key=certs/server.key 
+
+[Install]
+WantedBy=multi-user.target

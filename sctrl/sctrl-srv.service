@@ -1,12 +1,12 @@
 [Unit]
-Description=Reverse Server Service
+Description=Sctrl Server Service
 After=network.target
 
 [Service]
-User=rs-server
+User=sctrl-srv
 Restart=always
-WorkingDirectory=/srv/rsck/
-ExecStart=/srv/sctrl/sctrl -s -listen -token abc=1 -webaddr :9090 -cert build/sctrl/certs/server.pem -key build/sctrl/certs/server.key
+WorkingDirectory=/srv/sctrl/
+ExecStart=/srv/sctrl/sctrl -s -listen :9121 -token abc=1 -webaddr :9090 -cert certs/server.pem -key certs/server.key
 
 [Install]
 WantedBy=multi-user.target

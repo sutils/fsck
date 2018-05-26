@@ -26,29 +26,12 @@ import (
 	"github.com/Centny/gwf/routing"
 	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
-	"github.com/sutils/readkey"
 	"github.com/sutils/rsck"
 	"golang.org/x/net/webdav"
 )
 
 const Version = "1.0.0"
 
-var exitf = func(code int) {
-	readkey.Close()
-	os.Exit(code)
-}
-var readkeyRead = func(n string) (key []byte, err error) {
-	key, err = readkey.Read()
-	return
-}
-var readkeyClose = func(n string) {
-	readkey.Close()
-}
-var readkeyOpen = func(n string) {
-	readkey.Open()
-}
-var readkeyGetSize = readkey.GetSize
-var readkeySetSize = readkey.SetSize
 var stdin = os.Stdin
 
 type ArrayFlags []string

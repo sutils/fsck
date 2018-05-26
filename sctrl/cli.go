@@ -1,31 +1,28 @@
 package main
 
 import (
-	"C"
 	"bytes"
+	"container/list"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"container/list"
-	"encoding/json"
-	"io/ioutil"
-	"log"
-	"os/signal"
-	"path/filepath"
 	"time"
 
-	"github.com/sutils/fsck"
-
 	"github.com/Centny/gwf/util"
+	"github.com/sutils/fsck"
 )
 
 const (

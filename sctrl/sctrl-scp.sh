@@ -11,4 +11,12 @@ if [ $# -lt 2 ];then
 fi
 
 path=`dirname ${0}`/sctrl
-eval `$path -scp $1 $2`
+cmds=`$path -ssh $1`
+ecode=$?
+if [ "$ecode" == "200" ];then
+    eval $cmds
+else
+    echo $cmds
+    echo "exit code:$ecode"
+    exit $ecode
+fi

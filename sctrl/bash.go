@@ -68,8 +68,7 @@ func (c *Cmd) Start() (err error) {
 	if c.Cmd.SysProcAttr == nil {
 		c.Cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	c.Cmd.SysProcAttr.Setctty = true
-	c.Cmd.SysProcAttr.Setsid = true
+	setCmdAttr(c.Cmd)
 	err = c.Cmd.Start()
 	if err != nil {
 		tty.Close()
