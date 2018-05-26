@@ -307,8 +307,6 @@ func (f *Forward) ProcWebForward(hs *routing.HTTPSession) routing.HResult {
 		hs.W.WriteHeader(404)
 		return hs.Printf("alias not exist by name:%v", name)
 	}
-	hs.R.URL.Scheme = mapping.Remote.Scheme
-	hs.R.URL.Host = mapping.Remote.Host
 	if len(f.WebAuth) > 0 && mapping.Local.Query().Get("auth") != "0" {
 		username, password, ok := hs.R.BasicAuth()
 		if !(ok && f.WebAuth == fmt.Sprintf("%v:%s", username, password)) {
@@ -320,14 +318,15 @@ func (f *Forward) ProcWebForward(hs *routing.HTTPSession) routing.HResult {
 	}
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
-			req.Host = req.URL.Host
+			req.URL.Host = hs.R.Host
+			req.URL.Scheme = mapping.Remote.Scheme
 		},
 		Transport: &http.Transport{
 			Dial: func(network, addr string) (raw net.Conn, err error) {
-				return f.procDial(network, addr, mapping)
+				return f.procDial(network, mapping.Remote.Host, mapping)
 			},
 			DialTLS: func(network, addr string) (raw net.Conn, err error) {
-				return f.procDialTLS(network, addr, mapping)
+				return f.procDialTLS(network, mapping.Remote.Host, mapping)
 			},
 		},
 	}
@@ -345,9 +344,7 @@ func (f *Forward) procDialTLS(network, addr string, mapping *Mapping) (raw net.C
 	if err != nil {
 		return
 	}
-	tlsConn := tls.Client(rawCon, &tls.Config{
-		InsecureSkipVerify: true,
-	})
+	tlsConn := tls.Client(rawCon, &tls.Config{InsecureSkipVerify: true})
 	err = tlsConn.Handshake()
 	if err == nil {
 		raw = tlsConn
