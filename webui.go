@@ -303,12 +303,17 @@ func (w *WebUI) IndexH(hs *routing.HTTPSession) routing.HResult {
 	sorter := util.NewSorter(RecentLess(""), recents)
 	sorter.Desc = true
 	sort.Sort(sorter)
-	err = w.TEMP.Execute(hs.W, map[string]interface{}{
+	vals := map[string]interface{}{
 		"ns":        ns,
 		"forwards":  forwards,
 		"recents":   recents,
 		"webSuffix": forward.WebSuffix,
-	})
+	}
+	if hs.RVal("data") == "1" {
+		hs.JRes(vals)
+	} else {
+		err = w.TEMP.Execute(hs.W, vals)
+	}
 	if err != nil {
 		log.E("Parse html fail with %v", err)
 	}

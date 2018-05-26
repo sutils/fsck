@@ -616,8 +616,10 @@ func sctrlServer() {
 			webui.WS = workspace
 		}
 		webui.Hand(routing.Shared, "")
-		gwflog.D("Listen web server on %v", webAddr)
-		go routing.ListenAndServe(webAddr)
+		gwflog.D("run web server by listen:%v,websuffix:%v", webAddr, webSuffix)
+		go func() {
+			fmt.Println(routing.ListenAndServe(webAddr))
+		}()
 	}
 	if len(cert) > 0 {
 		gwflog.D("server load x509 cert:%v,key:%v", cert, key)
