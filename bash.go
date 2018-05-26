@@ -106,6 +106,8 @@ func (c *Cmd) Write(p []byte) (n int, err error) {
 			err = fmt.Errorf("closed")
 			return
 		}
+	} else {
+		c.ctrlc = 0
 	}
 	n, err = c.pipe.Write(p)
 	return
