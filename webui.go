@@ -57,7 +57,7 @@ var WEBUI_HTML = `
 </head>
 
 <body>
-    <form action="addForward" method="POST">
+    <form action="/ui/addForward" method="POST">
         <table>
             <td>
                 <textarea name="forwards"></textarea>
@@ -86,10 +86,10 @@ var WEBUI_HTML = `
                 <td class="boder_1px">
                     <table class="noneborder" style="width:100%">
                         {{range $i, $f := $channel.MS}}
-                        <tr class="noneborder" style="height:20px">
-                            <td class="noneborder">{{printf "%v" $f | html}}</td>
+						<tr class="noneborder" style="height:20px">
+                            <td class="noneborder">{{printf "%v@%v" $f.Name $f | html}}</td>
                             <td class="noneborder" style="width:60px;text-align:center;">
-								<a style="margin-left:10px;" href="removeForward?local={{$f.Local}}">Remove</a>
+								<a style="margin-left:10px;" href="/ui/removeForward?local={{$f.Local}}">Remove</a>
 							</td>
 							<td class="noneborder" style="width:60px;text-align:center;">
 								{{if eq $f.Local.Scheme "web" }}
@@ -111,10 +111,10 @@ var WEBUI_HTML = `
         <tr class="noneborder" style="height:20px;text-align:left;">
             <td class="noneborder">{{printf "%v" $f | html}}</td>
             <td class="noneborder">
-                <a style="margin-left:10px;font-size:20px;text-decoration:none;font-weight:bold;" href="addForward?forwards={{$f}}">+</a>
+                <a style="margin-left:10px;font-size:20px;text-decoration:none;font-weight:bold;" href="/ui/addForward?forwards={{$f}}">+</a>
 			</td>
 			<td class="noneborder">
-                <a style="margin-left:10px;font-size:20px;text-decoration:none;font-weight:bold;" href="removeRecent?forwards={{$f}}">-</a>
+                <a style="margin-left:10px;font-size:20px;text-decoration:none;font-weight:bold;" href="/ui/removeRecent?forwards={{$f}}">-</a>
             </td>
         </tr>
         {{end}}
@@ -197,24 +197,23 @@ func (w *WebUI) WriteRecent(recent map[string]int) {
 	}
 }
 
-func (w *WebUI) Hand(mux *routing.SessionMux, pre string) {
-	mux.HFunc("^"+pre+".*$", w.AllFilterH)
+func (w *WebUI) Hand(mux *routing.SessionMux, redirect bool) {
+	pre := "/ui"
+	mux.HFunc("^"+pre+".*$", w.AuthFilterH)
 	mux.HFunc("^"+pre+"/removeForward(\\?.*)?$", w.RemoveForwardH)
 	mux.HFunc("^"+pre+"/addForward(\\?.*)?$", w.AddForwardH)
 	mux.HFunc("^"+pre+"/removeRecent(\\?.*)?$", w.RemoveRecentH)
 	mux.HFunc("^"+pre+".*$", w.IndexH)
+	if redirect {
+		mux.HFunc("^/(\\?.*)?$", func(hs *routing.HTTPSession) routing.HResult {
+			hs.Redirect(pre)
+			return routing.HRES_RETURN
+		})
+	}
 }
 
-func (w *WebUI) AllFilterH(hs *routing.HTTPSession) routing.HResult {
-	host := hs.R.Host
+func (w *WebUI) AuthFilterH(hs *routing.HTTPSession) routing.HResult {
 	forward := w.Ctrl.LoadForward()
-	webSuffix := forward.WebSuffix
-	if len(webSuffix) > 0 && strings.HasSuffix(host, webSuffix) {
-		name := strings.Trim(strings.TrimSuffix(host, webSuffix), ". ")
-		if len(name) > 0 {
-			return w.Ctrl.LoadForward().ProcWebForward(hs)
-		}
-	}
 	auth := forward.WebAuth
 	username, password, ok := hs.R.BasicAuth()
 	if len(auth) > 0 && !(ok && auth == fmt.Sprintf("%v:%s", username, password)) {
@@ -235,7 +234,7 @@ func (w *WebUI) RemoveForwardH(hs *routing.HTTPSession) routing.HResult {
 		return hs.Printf("%v", err)
 	}
 	w.Ctrl.LoadForward().RemoveForward(local)
-	hs.Redirect("/")
+	hs.Redirect("/ui")
 	log.D("WebUI remove forward by %v", local)
 	return routing.HRES_RETURN
 }
@@ -256,7 +255,7 @@ func (w *WebUI) AddForwardH(hs *routing.HTTPSession) routing.HResult {
 		log.D("WebUI add forward by %v,%v", name, f)
 	}
 	w.WriteRecent(oldRecent)
-	hs.Redirect("/")
+	hs.Redirect("/ui")
 	return routing.HRES_RETURN
 }
 
@@ -265,7 +264,7 @@ func (w *WebUI) RemoveRecentH(hs *routing.HTTPSession) routing.HResult {
 	forwards := hs.RVal("forwards")
 	delete(oldRecent, forwards)
 	w.WriteRecent(oldRecent)
-	hs.Redirect("/")
+	hs.Redirect("/ui")
 	log.D("WebUI remove recent by %v", forwards)
 	return routing.HRES_RETURN
 }

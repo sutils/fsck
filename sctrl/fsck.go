@@ -12,12 +12,15 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/websocket"
 
 	gwflog "github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/netw"
@@ -638,7 +641,11 @@ func sctrlServer() {
 		if len(workspace) > 0 {
 			webui.WS = workspace
 		}
-		webui.Hand(routing.Shared, "")
+		routing.HFilterFunc("^.*$", server.Forward.HostForwardF)
+		server.Forward.WebPrefix = "/ws"
+		routing.HFunc("^/ws/.*$", server.Forward.ProcWebSubsH)
+		//
+		webui.Hand(routing.Shared, true)
 		gwflog.D("run web server by listen:%v,websuffix:%v", webAddr, webSuffix)
 		go func() {
 			fmt.Println(routing.ListenAndServe(webAddr))
@@ -805,16 +812,19 @@ func sctrlClient() {
 	}
 	terminal = NewTerminal(client, name, ps1, bash, webcmd, buffered)
 	terminal.InstancePath = instancePath
+	terminal.WebSrv.Addr = webAddr
+	terminal.Forward.WebAuth = webAuth
+	terminal.Forward.WebSuffix = webSuffix
+	if len(workspace) > 0 {
+		terminal.WebUI.WS = workspace
+	}
 	for key, val := range conf.Env {
 		terminal.Env = append(terminal.Env, fmt.Sprintf("%v=%v", key, val))
 	}
-
 	logout := NewNamedWriter("debug", terminal.Log)
 	log.SetOutput(logout)
 	gwflog.SetWriter(logout)
 	//
-	routing.Shared.HFunc("/real/update", client.Real.UpdateH)
-	routing.Shared.HFunc("/real/show", client.Real.ShowH)
 	//
 	fmt.Printf("start connect to %v\n", serverAddr)
 	err = client.StartClient(serverAddr, util.UUID(), loginToken)
@@ -823,17 +833,6 @@ func sctrlClient() {
 		exitf(1)
 	}
 	fmt.Printf("%v is connected\n", serverAddr)
-	if len(webAddr) > 0 {
-		webui := fsck.NewWebUI(client)
-		client.Forward.WebAuth = webAuth
-		client.Forward.WebSuffix = webSuffix
-		if len(workspace) > 0 {
-			webui.WS = workspace
-		}
-		webui.Hand(routing.Shared, "")
-		fmt.Printf("listen web server on %v\n", webAddr)
-		go routing.ListenAndServe(webAddr)
-	}
 	<-login
 	terminal.Start(conf)
 	terminal.ProcReadkey()
@@ -1243,23 +1242,65 @@ func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url s
 	return
 }
 
-func sctrlShell(name string) {
-	conn, err := net.Dial("tcp", name)
+func sctrlShell(uri string) {
+	var err error
+	var conn io.ReadWriteCloser
+	var rurl *url.URL
+	if strings.Contains(uri, "://") {
+		rurl, err = url.Parse(uri)
+		if err == nil {
+			switch rurl.Scheme {
+			case "tcp":
+				conn, err = net.Dial("tcp", rurl.Host)
+			case "ws":
+				conn, err = websocket.Dial(uri, "", "https://"+rurl.Host)
+			case "wss":
+				conn, err = websocket.Dial(uri, "", "https://"+rurl.Host)
+			default:
+				err = fmt.Errorf("scheme(%v) is not suppored", rurl.Scheme)
+			}
+		}
+	} else {
+		var srvAddr string
+		srvAddr, _, err = findWebURL("", true, true, true, 5*time.Second)
+		rurl, err = url.Parse(srvAddr)
+		if err == nil {
+			conn, err = websocket.Dial("ws://"+rurl.Host+"/ws/"+uri, "", srvAddr)
+		}
+	}
 	if err != nil {
-		fmt.Printf("connect to %v fail with %v", name, err)
+		fmt.Printf("connect to %v fail with %v\n", uri, err)
 		exitf(1)
 	}
-	go io.Copy(os.Stdout, conn)
 	readkeyOpen("shell")
+	defer func() {
+		conn.Close()
+		readkeyClose("shell")
+		exitf(0)
+	}()
+	go func() {
+		io.Copy(os.Stdout, conn)
+		fmt.Printf("connection is closed\n")
+		readkeyClose("shell")
+		exitf(0)
+	}()
+	stopc := 0
 	for {
-		key, err := readkeyRead("login")
-		if err != nil || bytes.Equal(key, CharTerm) {
+		key, err := readkeyRead("shell")
+		if err != nil {
 			break
+		}
+		if bytes.Equal(key, CharTerm) {
+			stopc++
+			if stopc > 5 {
+				break
+			}
+		} else {
+			stopc = 0
 		}
 		_, err = conn.Write(key)
 		if err != nil {
 			break
 		}
 	}
-	readkeyClose("shell")
 }

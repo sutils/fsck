@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/net/websocket"
+
 	"github.com/Centny/gwf/log"
 	"github.com/Centny/gwf/routing"
 	"github.com/Centny/gwf/util"
@@ -79,26 +81,29 @@ type ChannelInfo struct {
 type ForwardDialerF func(channel, uri string, raw io.WriteCloser) (session Session, err error)
 
 type Forward struct {
-	ls        map[string]*ForwardListener
-	ms        map[string]*Mapping
-	cs        map[string]Session
-	stop      map[string]chan int
-	ws        map[string]*Mapping
-	lck       sync.RWMutex
-	WebSuffix string
-	WebAuth   string
-	Dialer    ForwardDialerF
+	ls         map[string]*ForwardListener
+	ms         map[string]*Mapping
+	cs         map[string]Session
+	stop       map[string]chan int
+	webMapping map[string]*Mapping
+	wsMapping  map[string]*Mapping
+	lck        sync.RWMutex
+	WebPrefix  string
+	WebSuffix  string
+	WebAuth    string
+	Dialer     ForwardDialerF
 }
 
 func NewForward(dialer ForwardDialerF) *Forward {
 	return &Forward{
-		ls:     map[string]*ForwardListener{},
-		ms:     map[string]*Mapping{},
-		cs:     map[string]Session{},
-		stop:   map[string]chan int{},
-		ws:     map[string]*Mapping{},
-		lck:    sync.RWMutex{},
-		Dialer: dialer,
+		ls:         map[string]*ForwardListener{},
+		ms:         map[string]*Mapping{},
+		cs:         map[string]Session{},
+		stop:       map[string]chan int{},
+		webMapping: map[string]*Mapping{},
+		wsMapping:  map[string]*Mapping{},
+		lck:        sync.RWMutex{},
+		Dialer:     dialer,
 	}
 }
 
@@ -138,13 +143,22 @@ func (f *Forward) AddForward(m *Mapping) (err error) {
 		go f.accept(m, l, m.Channel, m.Remote.String())
 		log.D("Forward add tcp forward by %v success", m)
 	case "web":
-		if _, ok := f.ws[m.Local.Host]; ok {
+		if _, ok := f.webMapping[m.Local.Host]; ok {
 			err = fmt.Errorf("web host key(%v) is exists", m.Local.Host)
 			log.W("Forward add web forward by %v fail with key exists", m)
 		} else {
 			f.ms[m.Name] = m
-			f.ws[m.Local.Host] = m
+			f.webMapping[m.Local.Host] = m
 			log.D("Forward add web forward by %v success", m)
+		}
+	case "ws":
+		if _, ok := f.wsMapping[m.Local.Host]; ok {
+			err = fmt.Errorf("ws host key(%v) is exists", m.Local.Host)
+			log.W("Forward add ws forward by %v fail with key exists", m)
+		} else {
+			f.ms[m.Name] = m
+			f.wsMapping[m.Local.Host] = m
+			log.D("Forward add ws forward by %v success", m)
 		}
 	default:
 		err = fmt.Errorf("scheme %v is not suppored", m.Local.Scheme)
@@ -159,17 +173,8 @@ func (f *Forward) RemoveForward(local string) (err error) {
 	}
 	f.lck.Lock()
 	defer f.lck.Unlock()
-	if rurl.Scheme == "web" {
-		forward := f.ws[rurl.Host]
-		if forward != nil {
-			delete(f.ws, rurl.Host)
-			delete(f.ms, forward.Name)
-			log.D("Forward removing web forward by %v success", local)
-		} else {
-			err = fmt.Errorf("web forward is not exist by %v", local)
-			log.D("Forward removing web forward by %v fail with not exists", local)
-		}
-	} else {
+	switch rurl.Scheme {
+	case "tcp":
 		listener := f.ls[rurl.Host]
 		if listener != nil {
 			listener.Close()
@@ -180,6 +185,30 @@ func (f *Forward) RemoveForward(local string) (err error) {
 			err = fmt.Errorf("forward is not exitst")
 			log.D("Forward removing forward by %v fail with not exists", local)
 		}
+	case "web":
+		forward := f.webMapping[rurl.Host]
+		if forward != nil {
+			delete(f.webMapping, rurl.Host)
+			delete(f.ms, forward.Name)
+			log.D("Forward removing web forward by %v success", local)
+		} else {
+			err = fmt.Errorf("web forward is not exist by %v", local)
+			log.D("Forward removing web forward by %v fail with not exists", local)
+		}
+	case "ws":
+		fallthrough
+	case "wss":
+		forward := f.wsMapping[rurl.Host]
+		if forward != nil {
+			delete(f.wsMapping, rurl.Host)
+			delete(f.ms, forward.Name)
+			log.D("Forward removing ws forward by %v success", local)
+		} else {
+			err = fmt.Errorf("ws forward is not exist by %v", local)
+			log.D("Forward removing ws forward by %v fail with not exists", local)
+		}
+	default:
+		err = fmt.Errorf("scheme %v is not suppored", rurl.Scheme)
 	}
 	return
 }
@@ -191,7 +220,10 @@ func (f *Forward) AllForwards() (mapping map[string][]*Mapping) {
 	for _, l := range f.ls {
 		mapping[l.Channel] = append(mapping[l.Channel], l.Mapping)
 	}
-	for _, m := range f.ws {
+	for _, m := range f.webMapping {
+		mapping[m.Channel] = append(mapping[m.Channel], m)
+	}
+	for _, m := range f.wsMapping {
 		mapping[m.Channel] = append(mapping[m.Channel], m)
 	}
 	return
@@ -298,27 +330,55 @@ func (f *Forward) Close() error {
 	return nil
 }
 
-func (f *Forward) ProcWebForward(hs *routing.HTTPSession) routing.HResult {
-	name := strings.Trim(strings.TrimSuffix(hs.R.Host, f.WebSuffix), ". ")
+func (f *Forward) ProcWebSubsH(hs *routing.HTTPSession) routing.HResult {
+	parts := strings.Split(strings.TrimPrefix(strings.TrimPrefix(hs.R.URL.Path, f.WebPrefix), "/"), "/")
+	return f.ProcName(parts[0], hs)
+}
+
+func (f *Forward) HostForwardF(hs *routing.HTTPSession) routing.HResult {
+	host := hs.R.Host
+	if len(f.WebSuffix) > 0 && strings.HasSuffix(host, f.WebSuffix) {
+		name := strings.Trim(strings.TrimSuffix(host, f.WebSuffix), ". ")
+		if len(name) > 0 {
+			return f.ProcName(name, hs)
+		}
+	}
+	return routing.HRES_CONTINUE
+}
+
+func (f *Forward) ProcName(name string, hs *routing.HTTPSession) routing.HResult {
+	connection := hs.R.Header.Get("Connection")
+	log.D("Forward proc web by name(%v),Connection(%v)", name, connection)
+	var mapping *Mapping
 	f.lck.RLock()
-	mapping := f.ws[name]
+	if connection == "Upgrade" {
+		mapping = f.wsMapping[name]
+	} else {
+		mapping = f.webMapping[name]
+	}
 	f.lck.RUnlock()
 	if mapping == nil {
 		hs.W.WriteHeader(404)
+		log.W("Forward proc web by name(%v),Connection(%v) fail with not found", name, connection)
 		return hs.Printf("alias not exist by name:%v", name)
+	}
+	if connection == "Upgrade" {
+		websocket.Handler(func(conn *websocket.Conn) {
+			f.runWebsocket(conn, mapping)
+		}).ServeHTTP(hs.W, hs.R)
+		return routing.HRES_RETURN
 	}
 	if len(f.WebAuth) > 0 && mapping.Local.Query().Get("auth") != "0" {
 		username, password, ok := hs.R.BasicAuth()
 		if !(ok && f.WebAuth == fmt.Sprintf("%v:%s", username, password)) {
 			hs.W.Header().Set("WWW-Authenticate", "Basic realm=Reverse Server")
 			hs.W.WriteHeader(401)
-			hs.Printf("%v", "401 Unauthorized")
-			return routing.HRES_RETURN
+			return hs.Printf("%v", "401 Unauthorized")
 		}
 	}
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
-			req.URL.Host = hs.R.Host
+			req.URL.Host = req.Host
 			req.URL.Scheme = mapping.Remote.Scheme
 		},
 		Transport: &http.Transport{
@@ -332,6 +392,17 @@ func (f *Forward) ProcWebForward(hs *routing.HTTPSession) routing.HResult {
 	}
 	proxy.ServeHTTP(hs.W, hs.R)
 	return routing.HRES_RETURN
+}
+
+func (f *Forward) runWebsocket(conn *websocket.Conn, mapping *Mapping) {
+	raw, err := f.Dialer(mapping.Channel, mapping.Remote.String(), conn)
+	if err != nil {
+		conn.Close()
+		return
+	}
+	io.Copy(raw, conn)
+	raw.Close()
+	conn.Close()
 }
 
 func (f *Forward) procDial(network, addr string, mapping *Mapping) (raw net.Conn, err error) {

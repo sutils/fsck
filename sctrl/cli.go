@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Centny/gwf/routing"
+
 	"github.com/Centny/gwf/util"
 	"github.com/sutils/fsck"
 )
@@ -110,17 +112,27 @@ func (t *Task) Header() map[string]string {
 }
 
 type WebServer struct {
-	URL string
-	srv *http.Server
-	Mux *http.ServeMux
+	URL  string
+	srv  *http.Server
+	Mux  *routing.SessionMux
+	Addr string
 }
 
 func (w *WebServer) Start() (err error) {
-	w.srv = &http.Server{Addr: ":0", Handler: w.Mux}
-	l, err := net.Listen("tcp", ":0")
+	var l net.Listener
+	if len(w.Addr) > 0 {
+		l, err = net.Listen("tcp", w.Addr)
+	} else {
+		l, err = net.Listen("tcp", ":0")
+	}
 	if err == nil {
-		parts := strings.Split(l.Addr().String(), ":")
+		if len(w.Addr) < 1 {
+			w.Addr = l.Addr().String()
+		}
+		w.srv = &http.Server{Addr: l.Addr().String(), Handler: w.Mux}
+		parts := strings.Split(w.Addr, ":")
 		w.URL = fmt.Sprintf("http://127.0.0.1:%v", parts[len(parts)-1])
+		fmt.Printf("listen wen on %v\n", w.Addr)
 		go w.srv.Serve(l)
 	}
 	return
@@ -143,9 +155,10 @@ type Terminal struct {
 	last         string
 	running      bool
 	C            *fsck.Slaver
-	Mux          *http.ServeMux
+	Mux          *routing.SessionMux
 	WebSrv       *WebServer
 	Forward      *fsck.Forward
+	WebUI        *fsck.WebUI
 	WebCmd       string //the web cmd path
 	CmdPrefix    string
 	InstancePath string
@@ -182,7 +195,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 		ss:           list.New(),
 		slck:         sync.RWMutex{},
 		C:            c,
-		Mux:          http.NewServeMux(),
+		Mux:          routing.NewSessionMux2(""),
 		Cmd:          fsck.NewCallbackCmd("sctrl", ps1, shell),
 		Web:          NewWeb(nil),
 		Log:          NewWebLogger(name, buffered),
@@ -194,6 +207,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 		InstancePath: "/tmp/.sctrl_instance.json",
 		Name:         name,
 		Forward:      c.Forward,
+		WebUI:        fsck.NewWebUI(c),
 		stdout:       os.Stdout,
 		profile:      bytes.NewBuffer(nil),
 		//
@@ -206,9 +220,18 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 	}
 	term.Web.H = term.OnWebCmd
 	term.WebSrv = &WebServer{Mux: term.Mux}
-	term.Mux.Handle("/exec", term.Web)
-	term.Mux.HandleFunc("/log", term.Log.WebLogH)
-	term.Mux.HandleFunc("/lslog", term.Log.ListLogH)
+	//
+	term.Mux.HFilterFunc("^.*$", term.Forward.HostForwardF)
+	term.Forward.WebPrefix = "/ws"
+	term.Mux.HFunc("^/ws/.*$", term.Forward.ProcWebSubsH)
+	//
+	term.WebUI.Hand(term.Mux, true)
+	//
+	term.Mux.Handler("^/exec(\\?.*)?$", term.Web)
+	term.Mux.HandleFunc("/log(\\?.*)?$", term.Log.WebLogH)
+	term.Mux.HandleFunc("/lslog(\\?.*)?$", term.Log.ListLogH)
+	term.Mux.HFunc("^/real/update(\\?.*)?$", c.Real.UpdateH)
+	term.Mux.HFunc("^/real/show(\\?.*)?$", c.Real.ShowH)
 	prefix := bytes.NewBuffer(nil)
 	fmt.Fprintf(prefix, "set +o history\n")
 	fmt.Fprintf(prefix, "alias srun='%v/sctrl -run'\n", webcmd)
@@ -1166,7 +1189,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 		// 	fmt.Printf("forward conf %v is not correct,name/remote must be setted\n", MarshalAll(forward))
 		// 	continue
 		// }
-		fmt.Printf("add forward by %v,%v", name, forward)
+		fmt.Printf("add forward by %v,%v\n", name, forward)
 		_, err := t.AddUriForward(name, forward)
 		if err != nil {
 			fmt.Printf("add forward fail with %v\n", err)

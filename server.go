@@ -100,6 +100,7 @@ func NewMaster() *Master {
 		},
 	}
 	srv.Forward = NewForward(srv.DialSession)
+	srv.SP.OnSessionClosed = srv.OnSessionClosed
 	return srv
 }
 
@@ -309,12 +310,31 @@ func (m *Master) DialH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	return
 }
 
+func (m *Master) OnSessionClosed(session Session) {
+	// go func() {
+	sid := session.ID()
+	m.slck.RLock()
+	name := m.si2n[fmt.Sprintf("%v-%v", session, sid)]
+	cid := m.slavers[name]
+	m.slck.RUnlock()
+	cmdc := m.L.CmdC(cid)
+	if cmdc != nil {
+		cmdc.Exec_m("close", util.Map{
+			"sid": sid,
+		})
+	}
+	// }()
+}
+
 func (m *Master) DialSession(name, uri string, raw io.WriteCloser) (session Session, err error) {
 	sid, _, err := m.Dial("master", name, uri)
 	if err == nil {
 		session = m.SP.Bind(sid, WriterF(func(p []byte) (n int, err error) {
-			_, err = m.WriteToSlaver("master", p)
 			n = len(p)
+			reply, err := m.WriteToSlaver("master", p)
+			if err == nil {
+				err = ParseMessageErr(string(reply))
+			}
 			return
 		}), raw)
 	}
@@ -393,15 +413,31 @@ func (m *Master) CloseH(rc *impl.RCM_Cmd) (val interface{}, err error) {
 	if err != nil {
 		return
 	}
+	name := rc.Kvs().StrVal("name")
 	session := rc.Kvs().StrVal("session")
+	cid := ""
+	m.slck.RLock()
 	if len(session) < 1 {
-		err = fmt.Errorf("the session is empty, not login?")
+		session = m.ni2s[fmt.Sprintf("%v-%v", name, sid)]
+		cid = m.clients[session]
+	}
+	if len(name) < 1 {
+		name = m.si2n[fmt.Sprintf("%v-%v", session, sid)]
+		cid = m.slavers[name]
+	}
+	m.slck.RUnlock()
+	if len(session) < 1 || len(name) < 1 {
+		err = fmt.Errorf("not login?")
 		return
 	}
-	m.slck.RLock()
-	name := m.si2n[fmt.Sprintf("%v-%v", session, sid)]
-	cid := m.slavers[name]
-	m.slck.RUnlock()
+	log.D("Master closing session(%v) by name:%v,client:%v,cid:%v", sid, name, session, cid)
+	if session == "master" {
+		session := m.SP.Find(sid)
+		if session != nil {
+			session.Close()
+		}
+		return
+	}
 	defer func() {
 		m.slck.Lock()
 		delete(m.ni2s, fmt.Sprintf("%v-%v", name, sid))
@@ -625,7 +661,12 @@ func NewSlaver(alias string) *Slaver {
 		},
 	}
 	slaver.Forward = NewForward(slaver.DialSession)
+	slaver.SP.OnSessionClosed = slaver.OnSessionClosed
 	return slaver
+}
+
+func (s *Slaver) OnSessionClosed(session Session) {
+	s.Channel.CloseSession(session)
 }
 
 func (s *Slaver) LoadForward() *Forward {
@@ -847,6 +888,12 @@ func (c *Channel) Close(sid uint16) (err error) {
 		return
 	}
 	defer session.Close()
+	err = c.CloseSession(session)
+	return
+}
+
+func (c *Channel) CloseSession(session Session) (err error) {
+	sid := session.ID()
 	_, err = c.RM.Exec_m("/usr/close", util.Map{
 		"sid": sid,
 	})
@@ -898,21 +945,7 @@ func (c *Channel) PingExec(name, data string) (used, slaver int64, err error) {
 func (c *Channel) Write(p []byte) (n int, err error) {
 	reply, err := c.ExecBytes(p)
 	if err == nil {
-		message := string(reply)
-		switch message {
-		case ErrSessionClosed.Error():
-			err = ErrSessionClosed
-		case ErrSessionNotFound.Error():
-			err = ErrSessionNotFound
-		case OK:
-			err = nil
-		default:
-			if strings.HasPrefix(message, OK+":") {
-				err = &ErrOK{Data: strings.TrimPrefix(message, OK+":")}
-			} else {
-				err = fmt.Errorf(message)
-			}
-		}
+		err = ParseMessageErr(string(reply))
 		n = len(p)
 	}
 	return
@@ -1004,5 +1037,23 @@ func (c *Channel) RealLog(name []string, ns map[string]int64, keys map[string]st
 		"keys":  keys,
 		"clear": clear,
 	})
+	return
+}
+
+func ParseMessageErr(message string) (err error) {
+	switch message {
+	case ErrSessionClosed.Error():
+		err = ErrSessionClosed
+	case ErrSessionNotFound.Error():
+		err = ErrSessionNotFound
+	case OK:
+		err = nil
+	default:
+		if strings.HasPrefix(message, OK+":") {
+			err = &ErrOK{Data: strings.TrimPrefix(message, OK+":")}
+		} else {
+			err = fmt.Errorf(message)
+		}
+	}
 	return
 }

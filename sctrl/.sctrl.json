@@ -18,7 +18,9 @@
     ],
     "forward": {
         "loc": "tcp://:2943<test>tcp://loc.m:80",
-        "bash": "tcp://:2940<test>tcp://cmd?exec=bash"
+        "bash": "tcp://:2940<test>tcp://cmd?exec=bash",
+        "ws1": "ws://bash<test>tcp://cmd?exec=bash",
+        "ws2": "ws://t0<test>tcp://cmd?exec=bash"
     },
     "env": {
         "name1": "value1"

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Centny/gwf/netw"
@@ -49,6 +50,7 @@ type Session interface {
 	net.Conn
 	ID() uint16
 	RawWrite(p []byte) (n int, err error)
+	OnlyClose() (err error)
 }
 
 type SessionDialer interface {
@@ -63,6 +65,8 @@ type SidSession struct {
 	SID      uint16
 	Timeout  time.Duration
 	MaxDelay time.Duration
+	closed   int32
+	OnClose  func(session Session)
 }
 
 func NewSidSession(sid uint16, out io.Writer, raw io.WriteCloser) *SidSession {
@@ -80,6 +84,7 @@ func NewSidSession(sid uint16, out io.Writer, raw io.WriteCloser) *SidSession {
 		Raw:      writer,
 		Timeout:  60 * time.Second,
 		MaxDelay: 8 * time.Second,
+		OnClose:  func(session Session) {},
 	}
 }
 
@@ -149,8 +154,16 @@ func (s *SidSession) RawWrite(p []byte) (n int, err error) {
 }
 
 func (s *SidSession) Close() (err error) {
-	err = s.Raw.Close()
-	log.D("SidSession(%v) is closed", s.SID)
+	if atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
+		err = s.Raw.Close()
+		s.OnClose(s)
+	}
+	return
+}
+func (s *SidSession) OnlyClose() (err error) {
+	if atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
+		err = s.Raw.Close()
+	}
 	return
 }
 
@@ -177,17 +190,19 @@ func (s *SidSession) String() string {
 }
 
 type SessionPool struct {
-	ss      map[uint16]Session
-	lck     sync.RWMutex
-	wg      sync.WaitGroup
-	Dialers []Dialer
+	ss              map[uint16]Session
+	lck             sync.RWMutex
+	wg              sync.WaitGroup
+	Dialers         []Dialer
+	OnSessionClosed func(session Session)
 }
 
 func NewSessionPool() *SessionPool {
 	return &SessionPool{
-		ss:  map[uint16]Session{},
-		lck: sync.RWMutex{},
-		wg:  sync.WaitGroup{},
+		ss:              map[uint16]Session{},
+		lck:             sync.RWMutex{},
+		wg:              sync.WaitGroup{},
+		OnSessionClosed: func(session Session) {},
 	}
 }
 
@@ -261,8 +276,15 @@ func (s *SessionPool) Start(sid uint16, out io.Writer) (session Session) {
 func (s *SessionPool) Bind(sid uint16, out io.Writer, raw io.WriteCloser) (session Session) {
 	s.lck.Lock()
 	defer s.lck.Unlock()
-	session = NewSidSession(sid, out, raw)
-	s.ss[sid] = session
+	sids := NewSidSession(sid, out, raw)
+	sids.OnClose = func(base Session) {
+		s.lck.Lock()
+		delete(s.ss, sid)
+		s.lck.Unlock()
+		s.OnSessionClosed(base)
+	}
+	s.ss[sid] = sids
+	session = sids
 	return
 }
 
@@ -278,7 +300,7 @@ func (s *SessionPool) Remove(sid uint16) (session Session) {
 	defer s.lck.Unlock()
 	session, _ = s.ss[sid]
 	if session != nil {
-		session.Close()
+		session.OnlyClose()
 		delete(s.ss, sid)
 	}
 	return
