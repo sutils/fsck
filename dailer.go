@@ -116,12 +116,15 @@ func (c *CmdStdinWriter) Write(p []byte) (n int, err error) {
 type CmdDialer struct {
 	Replace  []byte
 	CloseTag []byte
+	BASH     string
+	PS1      string
 }
 
 func NewCmdDialer() *CmdDialer {
 	return &CmdDialer{
 		Replace:  []byte("\r"),
 		CloseTag: CMD_CTRL_C,
+		BASH:     "bash",
 	}
 }
 
@@ -140,12 +143,20 @@ func (c *CmdDialer) Dial(cid uint16, uri string) (raw io.ReadWriteCloser, err er
 	}
 	runnable := remote.Query().Get("exec")
 	log.D("CmdDialer dial to cmd:%v", runnable)
+	if runnable == "bash" {
+		cmd := NewCmd(c.BASH, c.PS1, c.BASH)
+		cmd.Cols, cmd.Rows = 80, 60
+		util.ValidAttrF(`cols,O|I,R:0;rows,O|I,R:0;`, remote.Query().Get, true, &cmd.Cols, &cmd.Rows)
+		err = cmd.Start()
+		raw = cmd
+		return
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
 		cmd = exec.Command("cmd", "/C", runnable)
 	default:
-		cmd = exec.Command("bash", "-c", runnable)
+		cmd = exec.Command(c.BASH, "-c", runnable)
 	}
 	retReader, stdWriter, err := os.Pipe()
 	if err != nil {

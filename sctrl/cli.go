@@ -137,7 +137,7 @@ type Terminal struct {
 	// ss        map[string]*SshSession
 	ss           *list.List
 	slck         sync.RWMutex
-	Cmd          *Cmd
+	Cmd          *fsck.CallbackCmd
 	Web          *Web
 	Log          *WebLogger
 	last         string
@@ -183,7 +183,7 @@ func NewTerminal(c *fsck.Slaver, name, ps1, shell, webcmd string, buffered int) 
 		slck:         sync.RWMutex{},
 		C:            c,
 		Mux:          http.NewServeMux(),
-		Cmd:          NewCmd("sctrl", ps1, shell),
+		Cmd:          fsck.NewCallbackCmd("sctrl", ps1, shell),
 		Web:          NewWeb(nil),
 		Log:          NewWebLogger(name, buffered),
 		WebCmd:       webcmd,
@@ -252,7 +252,7 @@ func (t *Terminal) OnWebCmd(w *Web, line string) (data interface{}, err error) {
 		buf := bytes.NewBuffer(nil)
 		for em := t.ss.Front(); em != nil; em = em.Next() {
 			session := em.Value.(*SshSession)
-			if len(t.selected) < 1 || Having(t.selected, session.Name) {
+			if len(t.selected) < 1 || fsck.Having(t.selected, session.Name) {
 				fmt.Fprintf(buf, "%v:%v\n", session.Name, session.Running)
 			}
 		}
@@ -674,7 +674,7 @@ func (t *Terminal) execRealTask(task *Task, name string, ns map[string]int64, ke
 					vals = append(vals, fmt.Sprintf("%v:%v", key, val))
 				}
 				sort.Sort(util.NewStringSorter(vals))
-				buf := ColumnBytes(" ", colmax, vals...)
+				buf := fsck.ColumnBytes(" ", colmax, vals...)
 				buf.WriteTo(task)
 				_, err = fmt.Fprintf(task, "\n\n")
 			}
@@ -770,7 +770,7 @@ func (t *Terminal) remoteTerm(task *Task, tid string) {
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
 		name := session.Name
-		if len(termTask.Selected) > 0 && !Having(termTask.Selected, name) {
+		if len(termTask.Selected) > 0 && !fsck.Having(termTask.Selected, name) {
 			continue
 		}
 		if !session.Running {
@@ -852,7 +852,7 @@ func (t *Terminal) remoteExecf(task *Task, script []byte, format string, args ..
 	for em := t.ss.Front(); em != nil; em = em.Next() {
 		session := em.Value.(*SshSession)
 		name := session.Name
-		if len(task.Selected) < 1 || Having(task.Selected, name) {
+		if len(task.Selected) < 1 || fsck.Having(task.Selected, name) {
 			wg.Add(1)
 			sid := fmt.Sprintf("%v-%v", task.ID, name)
 			go execSession(session, sid)
@@ -1137,7 +1137,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 		return
 	}
 	log.Printf("listen web on %v", t.WebSrv.URL)
-	t.Cmd.Env = append(t.Cmd.Env, t.Env...)
+	t.Cmd.Raw.Env = append(t.Cmd.Raw.Env, t.Env...)
 	t.Cmd.AddEnvf("%v=%v", KeyWebCmdURL, t.WebSrv.URL)
 	t.Cmd.AddEnvf("HISTFILE=/tmp/.sctrl_%v_history", t.Name)
 	t.Cmd.EnableCallback([]byte(t.CmdPrefix), t.callback)
@@ -1153,7 +1153,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 	//
 	for _, host := range conf.Hosts {
 		if len(host.Name) < 1 || len(host.URI) < 1 {
-			fmt.Printf("host conf %v is not correct,name/uri must be setted\n", MarshalAll(host))
+			fmt.Printf("host conf %v is not correct,name/uri must be setted\n", fsck.MarshalAll(host))
 			continue
 		}
 		err := t.AddSession(host.Name, host.URI, host.Startup > 0, host.Env)
@@ -1221,7 +1221,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 				if bytes.Equal(key, CharEnter) {
 					if len(sw) < 1 {
 						fmt.Printf("\n\nAll Hosts:\n")
-						WriteColumn(os.Stdout, t.AllHostName()...)
+						fsck.WriteColumn(os.Stdout, t.AllHostName()...)
 						fmt.Printf("\n\nPlease entry host name:")
 					} else {
 						t.Switch(string(sw))
@@ -1244,7 +1244,7 @@ func (t *Terminal) Start(conf *WorkConf) (err error) {
 			if bytes.Equal(key, CharCtrlb) {
 				sw = []byte{}
 				fmt.Printf("\n\nAll Hosts:\n")
-				WriteColumn(os.Stdout, t.AllHostName()...)
+				fsck.WriteColumn(os.Stdout, t.AllHostName()...)
 				fmt.Printf("\n\nPlease entry host name:")
 				t.keydone <- 1
 				continue

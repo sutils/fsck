@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+
+	"github.com/sutils/fsck"
 )
 
 type WebHeader interface {
@@ -119,7 +121,7 @@ func ExecWebCmd(url string, cmds string, keys map[string]string, out io.Writer) 
 	}
 	code = resp.StatusCode
 	callback := make(chan []byte, 3)
-	outw := NewOutWriter()
+	outw := fsck.NewOutWriter()
 	outw.Out = out
 	outw.EnableCallback([]byte(WebCmdPrefix), callback)
 	tid := resp.Header.Get("tid")

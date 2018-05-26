@@ -1,4 +1,4 @@
-package main
+package fsck
 
 // func TestBash(t *testing.T) {
 // 	cmd := NewCmd("n1", "", "bash")

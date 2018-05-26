@@ -17,7 +17,8 @@
         }
     ],
     "forward": {
-        "loc": "tcp://:2943<test>tcp://loc.m:80"
+        "loc": "tcp://:2943<test>tcp://loc.m:80",
+        "bash": "tcp://:2940<test>tcp://cmd?exec=bash"
     },
     "env": {
         "name1": "value1"

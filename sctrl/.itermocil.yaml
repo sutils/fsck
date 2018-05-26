@@ -3,11 +3,11 @@ windows:
     layout: layout-4-2
     root: $GOPATH/src/github.com/sutils/fsck/sctrl
     panes:
-      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -s -token abc=1 -webaddr :9090 -websuffix .rs.loc
+      - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -s -token abc=1 -webaddr :9090 -websuffix .test.loc:9090
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -sc -master localhost:9234 -auth abc -name test -realaddr :9235
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl-ssh.sh loc
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -lc debug
       - export SCTRL_INSTANCE=sctrl && go build && ./sctrl -lc allhost
       - commands:
-          - go build && ./sctrl -c -webaddr :9091
+          - go build && ./sctrl -c -webaddr :9091 -websuffix .test.loc:9091
         focus: true

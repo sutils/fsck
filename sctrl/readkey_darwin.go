@@ -6,26 +6,28 @@ import (
 	"github.com/sutils/readkey"
 )
 
-func exitf(code int) {
+var exitf = func(code int) {
 	readkey.Close()
 	os.Exit(code)
 }
 
-func readkeyRead(n string) (key []byte, err error) {
+var readkeyRead = func(n string) (key []byte, err error) {
 	key, err = readkey.Read()
 	return
 }
 
-func readkeyClose(n string) {
+var readkeyClose = func(n string) {
 	readkey.Close()
 }
 
-func readkeyOpen(n string) {
+var readkeyOpen = func(n string) {
 	readkey.Open()
 }
-func readkeyGetSize() (w, h int) {
+
+var readkeyGetSize = func() (w, h int) {
 	return readkey.GetSize()
 }
-func readkeySetSize(fd uintptr, w, h int) (err error) {
+
+var readkeySetSize = func(fd uintptr, w, h int) (err error) {
 	return readkey.SetSize(fd, w, h)
 }

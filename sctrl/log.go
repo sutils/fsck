@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/sutils/fsck"
 )
 
 type NameWriter interface {
@@ -71,14 +73,14 @@ func (w *WaitWriter) Close() error {
 }
 
 type WebLogWriter struct {
-	*MultiWriter
+	*fsck.MultiWriter
 	Buf *BufferedWriter
 	lck sync.RWMutex
 }
 
 func NewWebLogWriter(buffered int) *WebLogWriter {
 	return &WebLogWriter{
-		MultiWriter: NewMultiWriter(),
+		MultiWriter: fsck.NewMultiWriter(),
 		Buf:         NewBufferedWriterSize(ioutil.Discard, buffered),
 		lck:         sync.RWMutex{},
 	}
@@ -135,7 +137,7 @@ func (w *WebLogger) ListLogH(resp http.ResponseWriter, req *http.Request) {
 	} else {
 		ns = append(ns, "debug", "sctrl", "all", "allhost")
 	}
-	WriteColumn(resp, ns...)
+	fsck.WriteColumn(resp, ns...)
 }
 
 func (w *WebLogger) WebLogH(resp http.ResponseWriter, req *http.Request) {

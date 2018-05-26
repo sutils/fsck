@@ -146,10 +146,10 @@ func ParseSshHost(name, uri string, env map[string]interface{}) (host *SshHost, 
 type SshSession struct {
 	Running bool
 	*SshHost
-	*MultiWriter
+	*fsck.MultiWriter
 	Idx     int
 	C       *fsck.Slaver
-	out     *OutWriter
+	out     *fsck.OutWriter
 	conn    *SshNetConn
 	client  *ssh.Client
 	session *ssh.Session
@@ -163,8 +163,8 @@ func NewSshSession(c *fsck.Slaver, host *SshHost) *SshSession {
 	ss := &SshSession{
 		SshHost:     host,
 		C:           c,
-		out:         NewOutWriter(),
-		MultiWriter: NewMultiWriter(),
+		out:         fsck.NewOutWriter(),
+		MultiWriter: fsck.NewMultiWriter(),
 		lck:         sync.RWMutex{},
 	}
 	ss.MultiWriter.Add(ss.out)

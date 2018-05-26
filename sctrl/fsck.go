@@ -395,6 +395,24 @@ func printProfileUsage(code int, alias bool) {
 	exitf(code)
 }
 
+func printShellUsage(code int, alias bool) {
+	_, name := filepath.Split(os.Args[0])
+	if alias {
+		name = "sctrl-shell"
+	}
+	fmt.Fprintf(os.Stderr, "Sctrl shell version %v\n", Version)
+	if alias {
+		fmt.Fprintf(os.Stderr, "Usage:  %v <name|remote>\n", name)
+		fmt.Fprintf(os.Stderr, "        %v host1\n", name)
+		fmt.Fprintf(os.Stderr, "        %v 192.168.1.1:223\n", name)
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage:  %v -shell <name|remote>\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -shell host1\n", name)
+		fmt.Fprintf(os.Stderr, "        %v -shell 192.168.1.1:223\n", name)
+	}
+	exitf(code)
+}
+
 func main() {
 	_, name := filepath.Split(os.Args[0])
 	mode := ""
@@ -402,6 +420,11 @@ func main() {
 		mode = os.Args[1]
 	}
 	switch {
+	case name == "sctrl-shell" || mode == "-shell":
+		if len(os.Args) < 3 {
+			printShellUsage(1, name == "sctrl-shell")
+		}
+		sctrlShell(os.Args[2])
 	case name == "sctrl-echo" || mode == "-echo":
 		flag.StringVar(&listen, "listen", ":9010", "the sctrl echo server listen address")
 		flag.Parse()
@@ -477,12 +500,12 @@ func main() {
 			if len(os.Args) < 3 {
 				printExecUsage(1, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			}
-			sctrlExec(JoinArgs("", os.Args[2:]...), nil, name == "sctrl-wexec" || mode == "-wrun")
+			sctrlExec(fsck.JoinArgs("", os.Args[2:]...), nil, name == "sctrl-wexec" || mode == "-wrun")
 		} else {
 			if len(os.Args) < 2 {
 				printExecUsage(1, alias || name == "sctrl-exec" || name == "sctrl-wexec")
 			}
-			sctrlExec(JoinArgs("", os.Args[1:]...), nil, name == "sctrl-wexec" || mode == "-wrun")
+			sctrlExec(fsck.JoinArgs("", os.Args[1:]...), nil, name == "sctrl-wexec" || mode == "-wrun")
 		}
 	case name == "sctrl-sreal" || mode == "-sreal":
 		for _, arg := range os.Args {
@@ -496,7 +519,7 @@ func main() {
 			if len(os.Args) < 3 {
 				printSrealUsage(1, alias || name == "sctrl-sreal")
 			}
-			cmds := JoinArgs("sreal", os.Args[2:]...)
+			cmds := fsck.JoinArgs("sreal", os.Args[2:]...)
 			sctrlExec(cmds, map[string]string{
 				"r": cmds + " -clear",
 			}, name == "sctrl-sreal")
@@ -504,7 +527,7 @@ func main() {
 			if len(os.Args) < 2 {
 				printSrealUsage(1, alias || name == "sctrl-sreal")
 			}
-			cmds := JoinArgs("sreal", os.Args[1:]...)
+			cmds := fsck.JoinArgs("sreal", os.Args[1:]...)
 			sctrlExec(cmds, map[string]string{
 				"r": cmds + " -clear",
 			}, name == "sctrl-sreal")
@@ -520,12 +543,12 @@ func main() {
 			if len(os.Args) < 3 {
 				printSshUsage(0, name == "sctrl-wssh")
 			}
-			cmds = JoinArgs("wssh", os.Args[2])
+			cmds = fsck.JoinArgs("wssh", os.Args[2])
 		} else {
 			if len(os.Args) < 2 {
 				printSshUsage(0, name == "sctrl-wssh")
 			}
-			cmds = JoinArgs("wssh", os.Args[1])
+			cmds = fsck.JoinArgs("wssh", os.Args[1])
 		}
 		code, err := execCmds(cmds, nil, false, true, true)
 		if err != nil {
@@ -544,13 +567,13 @@ func main() {
 			if len(os.Args) < 4 {
 				printScpUsage(0, alias || name == "sctrl-wscp")
 			}
-			cmds = JoinArgs("wscp", os.Args[2:]...)
+			cmds = fsck.JoinArgs("wscp", os.Args[2:]...)
 		} else {
 			if len(os.Args) < 3 {
 				printScpUsage(0, alias || name == "sctrl-wscp")
 			}
 			fmt.Println(os.Args)
-			cmds = JoinArgs("wscp", os.Args[1:]...)
+			cmds = fsck.JoinArgs("wscp", os.Args[1:]...)
 		}
 		code, err := execCmds(cmds, nil, false, false, true)
 		if err != nil {
@@ -1218,4 +1241,25 @@ func findWebURL(last string, log, wait, signle bool, delay time.Duration) (url s
 		err = fmt.Errorf("read fsck config file(%v),instance(%v) fail with %v", confPath, oneconf["pwd"], "web_url not configured")
 	}
 	return
+}
+
+func sctrlShell(name string) {
+	conn, err := net.Dial("tcp", name)
+	if err != nil {
+		fmt.Printf("connect to %v fail with %v", name, err)
+		exitf(1)
+	}
+	go io.Copy(os.Stdout, conn)
+	readkeyOpen("shell")
+	for {
+		key, err := readkeyRead("login")
+		if err != nil || bytes.Equal(key, CharTerm) {
+			break
+		}
+		_, err = conn.Write(key)
+		if err != nil {
+			break
+		}
+	}
+	readkeyClose("shell")
 }

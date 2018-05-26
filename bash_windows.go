@@ -1,4 +1,4 @@
-package main
+package fsck
 
 import "os/exec"
 

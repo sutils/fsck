@@ -247,6 +247,7 @@ func (s *SessionPool) copy(session Session, raw io.ReadWriteCloser) {
 			break
 		}
 	}
+	log.D("SessionPool the session(%v) reader is close by %v", session.ID(), err)
 	session.Close()
 	raw.Close()
 	s.Remove(session.ID())
