@@ -422,6 +422,7 @@ func main() {
 	if len(os.Args) > 1 {
 		mode = os.Args[1]
 	}
+	netw.MOD_MAX_SIZE = 4
 	switch {
 	case name == "sctrl-shell" || mode == "-shell":
 		if len(os.Args) < 3 {
