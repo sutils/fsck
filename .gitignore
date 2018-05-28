@@ -29,3 +29,5 @@ sctrl/test/test.zip
 sctrl/build
 
 sctrl/.rnd
+
+*.bak
