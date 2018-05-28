@@ -835,8 +835,12 @@ func sctrlClient() {
 	}
 	fmt.Printf("%v is connected\n", serverAddr)
 	<-login
-	terminal.Start(conf)
-	terminal.ProcReadkey()
+	err = terminal.Start(conf)
+	if err == nil {
+		terminal.ProcReadkey()
+	} else {
+		fmt.Printf("terminal start fail with %v\n", err)
+	}
 	exitf(0)
 }
 

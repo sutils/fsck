@@ -1,6 +1,6 @@
 @echo off
 set srv_name=sctrl
-set srv_ver=1.3.5
+set srv_ver=1.3.6
 del /s /a /q build\%srv_name%
 mkdir build
 mkdir build\%srv_name%

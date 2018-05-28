@@ -72,12 +72,12 @@ func (t *TCPDialer) Dial(cid uint16, uri string) (raw io.ReadWriteCloser, err er
 		switch network {
 		case "http":
 			network = "tcp"
-			if !t.portMatcher.MatchString(uri) {
+			if !t.portMatcher.MatchString(host) {
 				host += ":80"
 			}
 		case "https":
 			network = "tcp"
-			if !t.portMatcher.MatchString(uri) {
+			if !t.portMatcher.MatchString(host) {
 				host += ":443"
 			}
 		}
